@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Polymarket Orderbook Dashboard</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: #f5f5f5;
+        }
+        h1 {
+            margin-bottom: 8px;
+        }
+        .controls {
+            margin-bottom: 16px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        select, input {
+            padding: 6px 8px;
+            font-size: 14px;
+        }
+        .orderbook-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .panel {
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .panel h2 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th, td {
+            padding: 4px 6px;
+            text-align: right;
+        }
+        th {
+            border-bottom: 1px solid #ddd;
+            font-weight: 600;
+        }
+        tr:nth-child(even) {
+            background: #fafafa;
+        }
+        tr:hover {
+            background: #f0f0f0;
+        }
+        .bid-row {
+            color: #006400;
+        }
+        .ask-row {
+            color: #8b0000;
+        }
+        .status {
+            margin-left: 8px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Polymarket Orderbook Dashboard</h1>
+    <div class="controls">
+        <label for="marketSelect">Market:</label>
+        <select id="marketSelect">
+            <option value="">Loading markets...</option>
+        </select>
+
+        <label for="depthInput">Depth:</label>
+        <input id="depthInput" type="number" value="10" min="1" max="50" style="width: 60px;">
+
+        <span class="status" id="statusText"></span>
+    </div>
+
+    <div class="orderbook-container">
+        <div class="panel">
+            <h2>Bids</h2>
+            <table id="bidsTable">
+                <thead>
+                    <tr>
+                        <th>Price</th>
+                        <th>Size</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="panel">
+            <h2>Asks</h2>
+            <table id="asksTable">
+                <thead>
+                    <tr>
+                        <th>Price</th>
+                        <th>Size</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "http://localhost:8000";
+        const marketSelect = document.getElementById("marketSelect");
+        const depthInput = document.getElementById("depthInput");
+        const bidsTableBody = document.querySelector("#bidsTable tbody");
+        const asksTableBody = document.querySelector("#asksTable tbody");
+        const statusText = document.getElementById("statusText");
+
+        let currentAssetId = "";
+        let timerId = null;
+
+        async function fetchMarkets() {
+            try {
+                const res = await fetch(`${API_BASE}/markets`);
+                const data = await res.json();
+
+                marketSelect.innerHTML = "";
+                data.forEach(m => {
+                    const opt = document.createElement("option");
+                    opt.value = m.asset_id;
+                    opt.textContent = m.label;
+                    marketSelect.appendChild(opt);
+                });
+
+                if (data.length > 0) {
+                    currentAssetId = data[0].asset_id;
+                    marketSelect.value = currentAssetId;
+                    statusText.textContent = `Loaded ${data.length} assets`;
+                } else {
+                    const opt = document.createElement("option");
+                    opt.value = "";
+                    opt.textContent = "No markets available";
+                    marketSelect.appendChild(opt);
+                }
+            } catch (e) {
+                console.error("Failed to load markets:", e);
+                statusText.textContent = "Failed to load markets";
+            }
+        }
+
+        function renderSide(tbody, rows, isBid) {
+            tbody.innerHTML = "";
+            rows.forEach(r => {
+                const tr = document.createElement("tr");
+                tr.className = isBid ? "bid-row" : "ask-row";
+
+                const priceTd = document.createElement("td");
+                priceTd.textContent = r.price.toFixed(3);
+
+                const sizeTd = document.createElement("td");
+                sizeTd.textContent = r.size.toFixed(0);
+
+                tr.appendChild(priceTd);
+                tr.appendChild(sizeTd);
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function fetchOrderbook() {
+            if (!currentAssetId) return;
+            const depth = parseInt(depthInput.value || "10", 10);
+
+            try {
+                const res = await fetch(`${API_BASE}/orderbook/${encodeURIComponent(currentAssetId)}?depth=${depth}`);
+                if (!res.ok) {
+                    statusText.textContent = `No data for asset ${currentAssetId}`;
+                    bidsTableBody.innerHTML = "";
+                    asksTableBody.innerHTML = "";
+                    return;
+                }
+                const data = await res.json();
+                renderSide(bidsTableBody, data.bids || [], true);
+                renderSide(asksTableBody, data.asks || [], false);
+                statusText.textContent = `Last update: ${new Date().toLocaleTimeString()} (asset ${currentAssetId})`;
+            } catch (e) {
+                console.error("Failed to load orderbook:", e);
+                statusText.textContent = "Error fetching orderbook";
+            }
+        }
+
+        function startPolling() {
+            if (timerId) clearInterval(timerId);
+            fetchOrderbook();
+            timerId = setInterval(fetchOrderbook, 1000); // 每秒刷新
+        }
+
+        marketSelect.addEventListener("change", () => {
+            currentAssetId = marketSelect.value;
+            startPolling();
+        });
+
+        depthInput.addEventListener("change", () => {
+            startPolling();
+        });
+
+        // 初始化：先拉市场，再开始轮询
+        (async function init() {
+            await fetchMarkets();
+            if (marketSelect.value) {
+                currentAssetId = marketSelect.value;
+                startPolling();
+            }
+        })();
+    </script>
+</body>
+</html>
