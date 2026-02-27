@@ -429,8 +429,8 @@ def analyze_best_place_price_from_book(book, side: str,
             # 第二、三档有前面的保护，不做占比检查
             if i == 0 and order_size is not None:
                 my_order_value = order_size * price
-                if my_order_value > depth * 0.5:
-                    continue  # 占比超过 50%，跳过第一档，尝试第二档
+                if my_order_value > depth * (1/3):
+                    continue  # 占比超过 1/3（33.3%），跳过第一档，尝试第二档
 
             # max_spread 范围检测
             if max_spread is not None and mid is not None:
