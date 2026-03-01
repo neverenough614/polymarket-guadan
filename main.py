@@ -21,16 +21,16 @@ import poly_data.global_state as global_state
 # ======================================================
 # ⚙️ 自动挂单配置
 # ======================================================
-STRATEGY_SHEET_NAME     = "Normal LP Strategy"
-CHAIN_REWARDS_SHEET_NAME = "Chain Rewards Alert"   # 链上赞助奖励市场（reward_monitor.py 写入）
+STRATEGY_SHEET_NAME      = "Normal LP Strategy"
+AGGRESSIVE_SHEET_NAME    = "High Reward Aggressive"  # 高奖励激进策略（刀口舔血）
 
 # 关键词黑名单（大小写不敏感，命中则跳过该市场）
 # 主要过滤：军事打击类、政治演讲单日事件、地缘政治占领/封锁类
 QUESTION_BLACKLIST_KEYWORDS = [
     # 军事打击类
-    "strikes", "strike", "attack", "attacks", "bomb", "missile", "nuclear strike",
+    # "strikes", "strike", "attack", "attacks", "bomb", "missile", "nuclear strike",
     # 地缘政治占领/封锁类
-    "capture", "invade", "invasion", "Strait of Hormuz","Iran","aliens","Iranian",
+     #"capture", "invade", "invasion", "Strait of Hormuz","Iran","aliens","Iranian",
     # 政治演讲单日事件
     # "State of the Union", 'say "', "tweets", "tweet",
 ]
@@ -41,9 +41,16 @@ RETRY_INTERVAL          = 300      # 深度不足重试间隔（秒，5分钟）
 SHEET_RELOAD_INTERVAL   = 300      # 表格重载间隔（秒）
 ENABLE_AUTO_PLACE       = True     # 是否启用自动挂单
 
-# 动态挂单量配置
-DYNAMIC_SIZE_RATIO      = 0.10     # 目标占前三档总深度的比例（10%）
-MAX_ORDER_SIZE          = 500.0    # 单次挂单量上限（shares）
+# 动态挂单量配置（分策略）
+# Normal LP：稳健策略，占比大、挂单量高
+NORMAL_SIZE_RATIO       = 0.30     # Normal LP 占前三档总深度 30%
+NORMAL_MAX_ORDER_SIZE   = 700.0    # Normal LP 最大 700 shares
+# High Reward：激进策略，占比小、挂单量低
+AGGRESSIVE_SIZE_RATIO   = 0.08     # High Reward 占前三档总深度 8%
+AGGRESSIVE_MAX_ORDER_SIZE = 300.0  # High Reward 最大 300 shares
+# 兼容旧代码的默认值
+DYNAMIC_SIZE_RATIO      = 0.10     # 默认（手动挂单等）
+MAX_ORDER_SIZE          = 500.0    # 默认上限
 # ======================================================
 # ⚙️ 自动清仓配置
 # ======================================================
@@ -318,7 +325,7 @@ def load_strategy_markets() -> List[Dict]:
     try:
         sh = get_spreadsheet()
 
-        # ── 1. Normal LP Strategy ──────────────────────────────
+        # ── 1. Normal LP Strategy（稳健策略）──────────────────────
         print(f"   📋 读取 '{STRATEGY_SHEET_NAME}' ...")
         try:
             wk1 = sh.worksheet(STRATEGY_SHEET_NAME)
@@ -332,7 +339,29 @@ def load_strategy_markets() -> List[Dict]:
         except Exception as e:
             print(f"   ⚠️ 读取 '{STRATEGY_SHEET_NAME}' 失败: {e}")
 
-        print(f"   ✅ 合并后共 {len(tokens)} 个 token（已去重）")
+        # ── 2. High Reward Aggressive（刀口舔血策略）──────────────
+        print(f"   📋 读取 '{AGGRESSIVE_SHEET_NAME}' ...")
+        try:
+            wk2 = sh.worksheet(AGGRESSIVE_SHEET_NAME)
+            df2 = pd.DataFrame(wk2.get_all_records())
+            if not df2.empty:
+                # 过滤掉提示行（question 列包含"当前无"的行）
+                df2 = df2[~df2['question'].astype(str).str.contains('当前无', na=False)]
+                if not df2.empty:
+                    n2 = _parse_sheet_tokens(df2, "High Reward", tokens, seen_token_ids,
+                                              max_spread_unit_cents=True)
+                    print(f"   ✅ '{AGGRESSIVE_SHEET_NAME}': {len(df2)} 行 → {n2} 个新 token")
+                else:
+                    print(f"   ⚠️ '{AGGRESSIVE_SHEET_NAME}' 无符合条件的市场")
+            else:
+                print(f"   ⚠️ '{AGGRESSIVE_SHEET_NAME}' 表格为空")
+        except Exception as e:
+            print(f"   ⚠️ 读取 '{AGGRESSIVE_SHEET_NAME}' 失败（可能尚未创建）: {e}")
+
+        # 统计各策略来源
+        normal_count = sum(1 for t in tokens if t.get("source") == "Normal LP")
+        aggressive_count = sum(1 for t in tokens if t.get("source") == "High Reward")
+        print(f"   ✅ 合并后共 {len(tokens)} 个 token（Normal LP: {normal_count}, High Reward: {aggressive_count}）")
         print(f"{'='*60}\n")
         return tokens
 
@@ -449,7 +478,9 @@ def is_extreme_price_market(best_bid: Optional[float]) -> bool:
     return best_bid <= EXTREME_PRICE_THRESHOLD or best_bid >= (1.0 - EXTREME_PRICE_THRESHOLD)
 
 def calculate_dynamic_size(book, mid: Optional[float], min_size: float,
-                           volatility_sum: float = 0.0) -> Optional[float]:
+                           volatility_sum: float = 0.0,
+                           size_ratio: float = DYNAMIC_SIZE_RATIO,
+                           max_order_size: float = MAX_ORDER_SIZE) -> Optional[float]:
     """
     根据市场前三档深度和波动率动态计算挂单量。
 
@@ -484,8 +515,8 @@ def calculate_dynamic_size(book, mid: Optional[float], min_size: float,
             return None
 
         # 分别计算各方向目标挂单量（shares）
-        bid_target = (top3_bid_depth * DYNAMIC_SIZE_RATIO / mid) if top3_bid_depth > 0 else 0
-        ask_target = (top3_ask_depth * DYNAMIC_SIZE_RATIO / mid) if top3_ask_depth > 0 else 0
+        bid_target = (top3_bid_depth * size_ratio / mid) if top3_bid_depth > 0 else 0
+        ask_target = (top3_ask_depth * size_ratio / mid) if top3_ask_depth > 0 else 0
 
         # 取较小值：确保两个方向都不会占比过大
         target_size = min(bid_target, ask_target) if (bid_target > 0 and ask_target > 0) else max(bid_target, ask_target)
@@ -501,8 +532,8 @@ def calculate_dynamic_size(book, mid: Optional[float], min_size: float,
         if target_size < min_size:
             return None
 
-        # 限制在 [min_size, MAX_ORDER_SIZE] 范围内，取整
-        final_size = min(target_size, MAX_ORDER_SIZE)
+        # 限制在 [min_size, max_order_size] 范围内，取整
+        final_size = min(target_size, max_order_size)
         final_size = round(final_size)
 
         return float(final_size)
@@ -539,9 +570,17 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
         result["mid"] = mid
 
         # 🔥 动态计算挂单量（基于前三档总深度 + 波动率加权）
-        # 返回 None 表示深度不足以支撑最小奖励挂单量，直接跳过
+        # 根据策略来源使用不同的占比和上限
+        source = token_info.get("source", "Normal LP")
         vol_sum = token_info.get("volatility_sum", 0.0)
-        order_size = calculate_dynamic_size(book, mid, base_min_size, volatility_sum=vol_sum)
+        if source == "High Reward":
+            sr, mos = AGGRESSIVE_SIZE_RATIO, AGGRESSIVE_MAX_ORDER_SIZE
+        elif source == "Normal LP":
+            sr, mos = NORMAL_SIZE_RATIO, NORMAL_MAX_ORDER_SIZE
+        else:
+            sr, mos = DYNAMIC_SIZE_RATIO, MAX_ORDER_SIZE
+        order_size = calculate_dynamic_size(book, mid, base_min_size, volatility_sum=vol_sum,
+                                            size_ratio=sr, max_order_size=mos)
         result["order_size"] = order_size
         if order_size is None:
             result["buy_status"] = "depth_insufficient"
@@ -910,14 +949,14 @@ async def auto_close_positions_task(strategy_tokens: list):
             if all_positions is None or len(all_positions) == 0:
                 continue
 
-            # 🔥 监视所有持仓（不限于列表），手动挂单也能自动清仓
+            # 只清仓策略列表中的 token（Normal LP + High Reward），不清仓手动买入的持仓
             positions_found = []
             for _, row in all_positions.iterrows():
                 asset = str(row.get('asset', ''))
                 size  = float(row.get('size', 0))
                 if size >= MIN_POSITION_TO_CLOSE:
                     if asset in token_map:
-                        # 列表中的 token：使用已知信息
+                        # 列表中的 token：清仓
                         t = token_map[asset]
                         positions_found.append({
                             "token_id":   asset,
@@ -926,15 +965,7 @@ async def auto_close_positions_task(strategy_tokens: list):
                             "shares":     size,
                             "neg_risk":   t.get("neg_risk", False),
                         })
-                    else:
-                        # 手动挂单的 token：使用默认值
-                        positions_found.append({
-                            "token_id":   asset,
-                            "token_type": "MANUAL",
-                            "question":   f"手动挂单 ({asset[:10]}...)",
-                            "shares":     size,
-                            "neg_risk":   False,
-                        })
+                    # else: 不在策略列表中的持仓 → 跳过，不清仓（可能是手动买入的）
 
             if not positions_found:
                 continue

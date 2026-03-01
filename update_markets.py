@@ -46,9 +46,16 @@ except:
     print("Creating new worksheet: Normal LP Strategy")
     wk_normal = spreadsheet.add_worksheet(title="Normal LP Strategy", rows=100, cols=20)
 
+# 4. 高奖励激进策略表 (High Reward Aggressive)
+try:
+    wk_aggressive = spreadsheet.worksheet("High Reward Aggressive")
+except:
+    print("Creating new worksheet: High Reward Aggressive")
+    wk_aggressive = spreadsheet.add_worksheet(title="High Reward Aggressive", rows=100, cols=20)
+
 sel_df = get_sel_df(spreadsheet, "Selected Markets")
 
-# 4. 新增奖励监控表
+# 5. 新增奖励监控表
 try:
     wk_rewards = spreadsheet.worksheet("New Rewards Alert")
 except:
@@ -296,23 +303,46 @@ def fetch_and_process_data():
     ].sort_values('gm_reward_per_100', ascending=False)
 
     # --- 策略 2: 正常稳健策略 (Normal LP) ---
-    # 要求：0.02 <= Spread <= 0.06, Volatility < 50
-    # 奖励筛选：mid_reward_per_100 > 0.3（基于实际挂单位置的奖励，门槛适当降低以覆盖更多市场）
-    # 兜底：如果 mid_reward 为 0（计算失败），则用 gm_reward_per_100 > 0.5 兜底
+    # 目标：博稳定，低波动、窄点差，被吃单亏损小
+    # 要求：0.02 <= Spread <= 0.04（收窄，降低被吃单亏损）
+    # 波动率 < 30（收紧，过滤高波动市场）
+    # 奖励筛选：mid_reward_per_100 > 0.3 或 gm_reward_per_100 > 0.5
     # 到期：>7天 或无到期日
-    # 排序：mid_rv_ratio 降序（实际奖励/波动率性价比最高的优先）
+    # 排序：mid_rv_ratio 降序
     normal_lp_df = master_df[
         (master_df['spread'] >= 0.02) & 
-        (master_df['spread'] <= 0.06) & 
-        (master_df['volatility_sum'] < 50) & 
+        (master_df['spread'] <= 0.04) & 
+        (master_df['volatility_sum'] < 30) & 
         ((master_df['mid_reward_per_100'] > 0.3) | (master_df['gm_reward_per_100'] > 0.5)) &
         ((master_df['days_to_expiry'] > 7) | (master_df['days_to_expiry'] == 0))
     ].sort_values('mid_rv_ratio', ascending=False)
+
+    # --- 策略 3: 高奖励激进策略 (High Reward Aggressive) ---
+    # 目标：博收益，刀口舔血，高奖励覆盖风险，靠防御快速撤单
+    # 要求：rewards_daily_rate >= 100（每日总奖励 >= $100）
+    # gm_reward_per_100 >= 2.0（每$100挂单奖励 >= $2/天）
+    # Spread: 2-12c（放宽，高奖励市场点差通常较宽）
+    # 波动率：不限（靠超敏感防御保护）
+    # 到期：>3天 或无到期日（短期也可以）
+    # 排序：gm_reward_per_100 降序（奖励率最高的优先）
+    # 确保 rewards_daily_rate 列存在
+    if 'rewards_daily_rate' in master_df.columns:
+        master_df['rewards_daily_rate'] = pd.to_numeric(master_df['rewards_daily_rate'], errors='coerce').fillna(0)
+        aggressive_df = master_df[
+            (master_df['rewards_daily_rate'] >= 100) &
+            (master_df['gm_reward_per_100'] >= 2.0) &
+            (master_df['spread'] >= 0.02) &
+            (master_df['spread'] <= 0.12) &
+            ((master_df['days_to_expiry'] > 3) | (master_df['days_to_expiry'] == 0))
+        ].sort_values('gm_reward_per_100', ascending=False)
+    else:
+        aggressive_df = pd.DataFrame()
 
     print(f"Strategy Matches Found:")
     print(f"  - Smart LP (Master): {len(smart_df)}")
     print(f"  - Blue Ocean: {len(blue_ocean_df)}")
     print(f"  - Normal LP: {len(normal_lp_df)}")
+    print(f"  - High Reward Aggressive: {len(aggressive_df)}")
 
     # ================== 更新 Google Sheets ==================
     if len(master_df) > 0:
@@ -330,7 +360,17 @@ def fetch_and_process_data():
             update_sheet(normal_lp_df, wk_normal)
             print("-> Updated 'Normal LP Strategy'")
             
-            # 4. 更新其他基础表 (全量更新时才做)
+            # 4. 更新 High Reward Aggressive (新表)
+            if not aggressive_df.empty:
+                update_sheet(aggressive_df, wk_aggressive)
+                print(f"-> Updated 'High Reward Aggressive' ({len(aggressive_df)} markets)")
+            else:
+                # 无符合条件的市场时写入提示
+                empty_df = pd.DataFrame([{'question': '当前无符合条件的高奖励市场'}])
+                update_sheet(empty_df, wk_aggressive)
+                print("-> Updated 'High Reward Aggressive' (无符合条件市场)")
+            
+            # 5. 更新其他基础表 (全量更新时才做)
             if len(master_df) > 20:
                 update_sheet(master_df, wk_all)
                 print("-> Updated 'All Markets'")
