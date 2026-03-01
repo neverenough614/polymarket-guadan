@@ -187,19 +187,21 @@ def clean_and_prepare_data(df):
     vol_cols = ['1_hour', '3_hour', '6_hour', '12_hour', '24_hour', '7_day', '30_day']
     
     # 确保关键指标是数值型 (加入 vol_cols 以便排序)
-    numeric_cols = ['spread', 'gm_reward_per_100', 'volatility_sum', 'best_bid', 'best_ask', 'volume'] + vol_cols
+    numeric_cols = ['spread', 'gm_reward_per_100', 'mid_reward_per_100', 'volatility_sum', 'best_bid', 'best_ask', 'volume'] + vol_cols
     
     for col in numeric_cols:
         if col in sdf.columns:
             sdf[col] = pd.to_numeric(sdf[col], errors='coerce').fillna(0)
     
-    # 计算 RV Ratio
+    # 计算 RV Ratio（保留原版 + 新增 mid 版本）
     if 'gm_reward_per_100' in sdf.columns and 'volatility_sum' in sdf.columns:
         sdf['rv_ratio'] = sdf['gm_reward_per_100'] / (sdf['volatility_sum'] + 0.001)
+    if 'mid_reward_per_100' in sdf.columns and 'volatility_sum' in sdf.columns:
+        sdf['mid_rv_ratio'] = sdf['mid_reward_per_100'] / (sdf['volatility_sum'] + 0.001)
     
     # === [修改点 2] 将详细波动率加入显示列表 ===
     priority_cols = [
-        'question', 'rv_ratio', 'gm_reward_per_100', 'spread', 
+        'question', 'mid_rv_ratio', 'rv_ratio', 'mid_reward_per_100', 'gm_reward_per_100', 'spread', 
         'volatility_sum'] + vol_cols + [ # 把详细波动率插在这里
         'volume', 'days_to_expiry', 
         'best_bid', 'best_ask', 'answer1', 'market_slug', 'end_date'
@@ -219,13 +221,34 @@ def fetch_and_process_data():
     # 1. 获取数据
     all_df = get_all_markets(client)
     print(f"Got all Markets: {len(all_df)}")
-    all_results = get_all_results(all_df, client)
+
+    # 🔥 性能优化：提前过滤无奖励市场，避免对 3000+ 个无奖励市场调用订单簿 API
+    def _has_reward(rewards):
+        """检查市场是否有流动性奖励"""
+        if not isinstance(rewards, dict):
+            return False
+        rates = rewards.get('rates', [])
+        if not rates:
+            return False
+        for rate_info in rates:
+            if rate_info.get('rewards_daily_rate', 0) > 0:
+                return True
+        return False
+
+    if 'rewards' in all_df.columns:
+        rewarded_df = all_df[all_df['rewards'].apply(_has_reward)].reset_index(drop=True)
+        print(f"🔥 [性能优化] 有奖励的市场: {len(rewarded_df)} / {len(all_df)}（跳过 {len(all_df) - len(rewarded_df)} 个无奖励市场）")
+    else:
+        rewarded_df = all_df
+        print(f"⚠️ 未找到 rewards 列，处理全部 {len(all_df)} 个市场")
+
+    all_results = get_all_results(rewarded_df, client)
     print("Got all Results")
     m_data, all_markets = get_markets(all_results, sel_df, maker_reward=0.75)
     print(f"Got all orderbook. Total markets: {len(all_markets)}")
 
-    # 2. 计算波动率
-    new_df = add_volatility_to_df(all_markets)
+    # 2. 计算波动率（并发数从默认5提升到15，加速波动率获取）
+    new_df = add_volatility_to_df(all_markets, max_workers=15)
     
     # 3. 基础数据处理
     for col in ['24_hour', '7_day', '14_day']:
@@ -273,16 +296,18 @@ def fetch_and_process_data():
     ].sort_values('gm_reward_per_100', ascending=False)
 
     # --- 策略 2: 正常稳健策略 (Normal LP) ---
-    # 要求：0.02 <= Spread <= 0.06, Volatility < 50, Reward > 0.5
+    # 要求：0.02 <= Spread <= 0.06, Volatility < 50
+    # 奖励筛选：mid_reward_per_100 > 0.3（基于实际挂单位置的奖励，门槛适当降低以覆盖更多市场）
+    # 兜底：如果 mid_reward 为 0（计算失败），则用 gm_reward_per_100 > 0.5 兜底
     # 到期：>7天 或无到期日
-    # 排序：rv_ratio 降序（奖励/波动率性价比最高的优先）
+    # 排序：mid_rv_ratio 降序（实际奖励/波动率性价比最高的优先）
     normal_lp_df = master_df[
         (master_df['spread'] >= 0.02) & 
         (master_df['spread'] <= 0.06) & 
         (master_df['volatility_sum'] < 50) & 
-        (master_df['gm_reward_per_100'] > 0.5) &
+        ((master_df['mid_reward_per_100'] > 0.3) | (master_df['gm_reward_per_100'] > 0.5)) &
         ((master_df['days_to_expiry'] > 7) | (master_df['days_to_expiry'] == 0))
-    ].sort_values('rv_ratio', ascending=False)
+    ].sort_values('mid_rv_ratio', ascending=False)
 
     print(f"Strategy Matches Found:")
     print(f"  - Smart LP (Master): {len(smart_df)}")

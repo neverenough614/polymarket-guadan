@@ -1,4 +1,4 @@
-await asyncio.sleep(3)import threading
+import threading
 import asyncio
 import time
 import traceback
@@ -43,12 +43,11 @@ ENABLE_AUTO_PLACE       = True     # 是否启用自动挂单
 
 # 动态挂单量配置
 DYNAMIC_SIZE_RATIO      = 0.10     # 目标占前三档总深度的比例（10%）
-MAX_ORDER_SIZE          = 200.0    # 单次挂单量上限（shares）
-
+MAX_ORDER_SIZE          = 500.0    # 单次挂单量上限（shares）
 # ======================================================
 # ⚙️ 自动清仓配置
 # ======================================================
-POSITION_CHECK_INTERVAL = 30       # 持仓检查间隔（秒）
+POSITION_CHECK_INTERVAL = 3       # 持仓检查间隔（秒）
 MIN_POSITION_TO_CLOSE   = 5.0      # 最小清仓阈值（shares）
 CLOSE_PRICE_OFFSET      = 0.01     # 清仓价格偏移（best_bid - 此值，确保成交）
 
@@ -266,18 +265,28 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
             except:
                 max_spread = None
 
+        # volatility_sum（用于波动率加权挂单量）
+        vol_sum = 0.0
+        vol_col = find_col(df, 'volatility_sum')
+        if vol_col:
+            try:
+                vol_sum = float(str(row.get(vol_col, 0)).replace(',', ''))
+            except:
+                vol_sum = 0.0
+
         def add_token(token_id, token_type):
             nonlocal added
             if token_id not in seen_token_ids:
                 seen_token_ids[token_id] = len(tokens)
                 tokens.append({
-                    "token_id":   token_id,
-                    "token_type": token_type,
-                    "question":   question,
-                    "min_size":   min_size,
-                    "neg_risk":   neg_risk,
-                    "max_spread": max_spread,
-                    "source":     source_label,
+                    "token_id":       token_id,
+                    "token_type":     token_type,
+                    "question":       question,
+                    "min_size":       min_size,
+                    "neg_risk":       neg_risk,
+                    "max_spread":     max_spread,
+                    "volatility_sum": vol_sum,
+                    "source":         source_label,
                 })
                 added += 1
             else:
@@ -323,20 +332,39 @@ def load_strategy_markets() -> List[Dict]:
         except Exception as e:
             print(f"   ⚠️ 读取 '{STRATEGY_SHEET_NAME}' 失败: {e}")
 
-        # ── 2. Chain Rewards Alert ─────────────────────────────
-        # 已禁用：Chain Rewards 市场点差宽、容易成交，暂不自动挂单
-        # print(f"   📋 读取 '{CHAIN_REWARDS_SHEET_NAME}' ...")
-        # try:
-        #     wk2 = sh.worksheet(CHAIN_REWARDS_SHEET_NAME)
-        #     df2 = pd.DataFrame(wk2.get_all_records())
-        #     if not df2.empty:
-        #         n2 = _parse_sheet_tokens(df2, "Chain Rewards", tokens, seen_token_ids,
-        #                                   max_spread_unit_cents=True)
-        #         print(f"   ✅ '{CHAIN_REWARDS_SHEET_NAME}': {len(df2)} 行 → {n2} 个新 token")
-        #     else:
-        #         print(f"   ⚠️ '{CHAIN_REWARDS_SHEET_NAME}' 表格为空（reward_monitor 尚未写入）")
-        # except Exception as e:
-        #     print(f"   ⚠️ 读取 '{CHAIN_REWARDS_SHEET_NAME}' 失败（可能尚未创建）: {e}")
+        # ── 2. Chain Rewards Alert（带波动率筛选）─────────────────
+        # 链上赞助奖励市场：先读取，再通过波动率筛选过滤高波动市场
+        print(f"   📋 读取 '{CHAIN_REWARDS_SHEET_NAME}' ...")
+        try:
+            wk2 = sh.worksheet(CHAIN_REWARDS_SHEET_NAME)
+            df2 = pd.DataFrame(wk2.get_all_records())
+            if not df2.empty:
+                # 波动率筛选：如果表格中有 volatility_sum 列，过滤掉高波动市场
+                if 'volatility_sum' in df2.columns:
+                    df2['volatility_sum'] = pd.to_numeric(df2['volatility_sum'], errors='coerce').fillna(0)
+                    before_filter = len(df2)
+                    df2 = df2[df2['volatility_sum'] < 50].reset_index(drop=True)
+                    filtered_out = before_filter - len(df2)
+                    if filtered_out > 0:
+                        print(f"   🔍 波动率筛选: 过滤掉 {filtered_out} 个高波动市场 (volatility_sum >= 50)")
+                # spread 筛选：过滤掉点差过宽的市场
+                if 'spread' in df2.columns:
+                    df2['spread'] = pd.to_numeric(df2['spread'], errors='coerce').fillna(0)
+                    before_filter = len(df2)
+                    df2 = df2[df2['spread'] <= 0.08].reset_index(drop=True)
+                    filtered_out = before_filter - len(df2)
+                    if filtered_out > 0:
+                        print(f"   🔍 点差筛选: 过滤掉 {filtered_out} 个宽点差市场 (spread > 0.08)")
+                if not df2.empty:
+                    n2 = _parse_sheet_tokens(df2, "Chain Rewards", tokens, seen_token_ids,
+                                              max_spread_unit_cents=True)
+                    print(f"   ✅ '{CHAIN_REWARDS_SHEET_NAME}': 筛选后 {len(df2)} 行 → {n2} 个新 token")
+                else:
+                    print(f"   ⚠️ '{CHAIN_REWARDS_SHEET_NAME}' 筛选后无符合条件的市场")
+            else:
+                print(f"   ⚠️ '{CHAIN_REWARDS_SHEET_NAME}' 表格为空（reward_monitor 尚未写入）")
+        except Exception as e:
+            print(f"   ⚠️ 读取 '{CHAIN_REWARDS_SHEET_NAME}' 失败（可能尚未创建）: {e}")
 
         print(f"   ✅ 合并后共 {len(tokens)} 个 token（已去重）")
         print(f"{'='*60}\n")
@@ -454,21 +482,23 @@ def is_extreme_price_market(best_bid: Optional[float]) -> bool:
     # 使用 <= / >= 确保恰好 10c 和 90c 也被识别为极端价格市场
     return best_bid <= EXTREME_PRICE_THRESHOLD or best_bid >= (1.0 - EXTREME_PRICE_THRESHOLD)
 
-def calculate_dynamic_size(book, mid: Optional[float], min_size: float) -> Optional[float]:
+def calculate_dynamic_size(book, mid: Optional[float], min_size: float,
+                           volatility_sum: float = 0.0) -> Optional[float]:
     """
-    根据市场前三档深度动态计算挂单量。
+    根据市场前三档深度和波动率动态计算挂单量。
 
     逻辑：
       1. 分别计算买单前三档深度和卖单前三档深度（USDC）
       2. 分别计算对应方向的目标挂单量（shares）
       3. 取两者中的较小值，确保任何一个方向都不会占比过大
-      4. 如果 target_size < min_size（奖励门槛），返回 None（深度不足，跳过不挂）
-      5. 否则返回 min(target_size, MAX_ORDER_SIZE)，取整
+      4. 应用波动率折扣因子：高波动市场挂小单，低波动市场挂大单
+      5. 如果 target_size < min_size（奖励门槛），返回 None（深度不足，跳过不挂）
+      6. 否则返回 min(target_size, MAX_ORDER_SIZE)，取整
 
-    为什么取较小值：
-      若买单深度薄（200 USDC）、卖单深度厚（2000 USDC），
-      合并计算会导致买单方向挂单量远超买单深度，极易被吃。
-      分别计算取较小值，确保两个方向都安全。
+    波动率折扣因子：
+      volatility_sum <= 10  → factor = 1.0（满额挂单）
+      volatility_sum = 25   → factor = 0.75
+      volatility_sum = 50   → factor = 0.33（大幅缩减）
 
     返回 None 表示深度不足以支撑最小奖励挂单量，应跳过该市场。
     """
@@ -493,6 +523,13 @@ def calculate_dynamic_size(book, mid: Optional[float], min_size: float) -> Optio
 
         # 取较小值：确保两个方向都不会占比过大
         target_size = min(bid_target, ask_target) if (bid_target > 0 and ask_target > 0) else max(bid_target, ask_target)
+
+        # 🔥 波动率折扣因子：高波动市场挂小单，低波动市场挂大单
+        if volatility_sum <= 10:
+            vol_factor = 1.0
+        else:
+            vol_factor = max(0.2, 1.0 - (volatility_sum - 10) / 60)
+        target_size = target_size * vol_factor
 
         # 如果 target_size < min_size（奖励门槛），说明深度不足以支撑最小奖励挂单量，跳过
         if target_size < min_size:
@@ -535,9 +572,10 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
         book, best_bid, best_ask, mid = get_orderbook_info(poly_client, token_id)
         result["mid"] = mid
 
-        # 🔥 动态计算挂单量（基于前三档总深度）
+        # 🔥 动态计算挂单量（基于前三档总深度 + 波动率加权）
         # 返回 None 表示深度不足以支撑最小奖励挂单量，直接跳过
-        order_size = calculate_dynamic_size(book, mid, base_min_size)
+        vol_sum = token_info.get("volatility_sum", 0.0)
+        order_size = calculate_dynamic_size(book, mid, base_min_size, volatility_sum=vol_sum)
         result["order_size"] = order_size
         if order_size is None:
             result["buy_status"] = "depth_insufficient"

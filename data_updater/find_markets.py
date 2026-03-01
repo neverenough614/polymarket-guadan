@@ -180,6 +180,28 @@ def process_single_row(row, client):
     ret['sm_reward_per_100'] = round((best_bid_reward + best_ask_reward) / 2, 2)
     ret['gm_reward_per_100'] = round((best_bid_reward * best_ask_reward) ** 0.5, 2)
 
+    # ── mid_reward_per_100: midpoint ±3 档的平均奖励（更贴合实际挂单位置）──
+    N_LEVELS = 3
+    mid_bid_reward = 0
+    mid_ask_reward = 0
+    try:
+        if not bids_df.empty and 'reward_per_100' in ret_bid.columns:
+            mid_bid_mask = ret_bid['price'].between(ret['midpoint'] - N_LEVELS * TICK_SIZE, ret['midpoint'])
+            mid_bid_rows = ret_bid[mid_bid_mask]
+            if not mid_bid_rows.empty:
+                mid_bid_reward = round(mid_bid_rows['reward_per_100'].mean(), 4)
+    except:
+        pass
+    try:
+        if not asks_df.empty and 'reward_per_100' in ret_ask.columns:
+            mid_ask_mask = ret_ask['price'].between(ret['midpoint'], ret['midpoint'] + N_LEVELS * TICK_SIZE)
+            mid_ask_rows = ret_ask[mid_ask_mask]
+            if not mid_ask_rows.empty:
+                mid_ask_reward = round(mid_ask_rows['reward_per_100'].mean(), 4)
+    except:
+        pass
+    ret['mid_reward_per_100'] = round((mid_bid_reward * mid_ask_reward) ** 0.5, 2) if (mid_bid_reward > 0 and mid_ask_reward > 0) else 0
+
     ret['end_date_iso'] = row.get('end_date_iso', '')
     ret['end_date'] = row.get('end_date_iso', '') 
     
@@ -309,7 +331,7 @@ def get_markets(all_results, sel_df, maker_reward=1):
         new_df = new_df.sort_values('rewards_daily_rate', ascending=False)
         new_df[' '] = ''
         
-        cols = ['question', 'answer1', 'answer2', 'neg_risk', 'spread', 'best_bid', 'best_ask', 'rewards_daily_rate', 'bid_reward_per_100', 'ask_reward_per_100', 'gm_reward_per_100', 'sm_reward_per_100', 'min_size', 'max_spread', 'tick_size', 'market_slug', 'token1', 'token2', 'condition_id', 'volume', 'end_date']
+        cols = ['question', 'answer1', 'answer2', 'neg_risk', 'spread', 'best_bid', 'best_ask', 'rewards_daily_rate', 'bid_reward_per_100', 'ask_reward_per_100', 'gm_reward_per_100', 'mid_reward_per_100', 'sm_reward_per_100', 'min_size', 'max_spread', 'tick_size', 'market_slug', 'token1', 'token2', 'condition_id', 'volume', 'end_date']
         for c in cols:
             if c not in new_df.columns:
                 new_df[c] = 0 if c == 'volume' else ''
