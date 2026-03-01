@@ -1,4 +1,4 @@
-import threading
+await asyncio.sleep(3)import threading
 import asyncio
 import time
 import traceback
@@ -30,7 +30,7 @@ QUESTION_BLACKLIST_KEYWORDS = [
     # 军事打击类
     "strikes", "strike", "attack", "attacks", "bomb", "missile", "nuclear strike",
     # 地缘政治占领/封锁类
-    "capture", "invade", "invasion", "Strait of Hormuz",
+    "capture", "invade", "invasion", "Strait of Hormuz","Iran","Iranian",
     # 政治演讲单日事件
     # "State of the Union", 'say "', "tweets", "tweet",
 ]
@@ -43,7 +43,7 @@ ENABLE_AUTO_PLACE       = True     # 是否启用自动挂单
 
 # 动态挂单量配置
 DYNAMIC_SIZE_RATIO      = 0.10     # 目标占前三档总深度的比例（10%）
-MAX_ORDER_SIZE          = 500.0    # 单次挂单量上限（shares）
+MAX_ORDER_SIZE          = 200.0    # 单次挂单量上限（shares）
 
 # ======================================================
 # ⚙️ 自动清仓配置
@@ -1262,6 +1262,21 @@ async def monitor_defense_loop(strategy_tokens: list):
                         await asyncio.to_thread(cancel_specific_token_monitor, poly_client, token_id, state.question, state.token_type)
                         state.first_run = True
                         state.reset_high_water()
+
+                        # 🔄 撤单后等待市场稳定，再尝试重新挂单
+                        await asyncio.sleep(30)
+                        token_info_replace = next((t for t in current_tokens if t["token_id"] == token_id), None)
+                        if token_info_replace:
+                            print(f"🔄 [防御后重挂] 正在重新检验挂单条件: {state.question[:40]}...")
+                            replace_result = await asyncio.to_thread(place_order_for_token, poly_client, token_info_replace)
+                            buy_ok  = replace_result.get("buy_status")  == "placed"
+                            sell_ok = replace_result.get("sell_status") == "placed"
+                            if buy_ok or sell_ok:
+                                buy_info  = f"买{replace_result['buy_tier']}(${replace_result['buy_price']:.3f})"  if buy_ok  else "买单跳过"
+                                sell_info = f"卖{replace_result['sell_tier']}(${replace_result['sell_price']:.3f})" if sell_ok else "卖单跳过"
+                                print(f"✅ [防御后重挂] 重新挂单成功: {buy_info} | {sell_info}")
+                            else:
+                                print(f"⚠️ [防御后重挂] 条件不满足，暂不挂单（{replace_result.get('error', '深度不足')}）")
                     else:
                         print("⚠️ 防御未开启，仅报警")
                     print("!" * 70)
