@@ -30,7 +30,7 @@ QUESTION_BLACKLIST_KEYWORDS = [
     # 军事打击类
     "strikes", "strike", "attack", "attacks", "bomb", "missile", "nuclear strike",
     # 地缘政治占领/封锁类
-    "capture", "invade", "invasion", "Strait of Hormuz","Iran","Iranian",
+    "capture", "invade", "invasion", "Strait of Hormuz","Iran","aliens","Iranian",
     # 政治演讲单日事件
     # "State of the Union", 'say "', "tweets", "tweet",
 ]
@@ -47,7 +47,7 @@ MAX_ORDER_SIZE          = 500.0    # 单次挂单量上限（shares）
 # ======================================================
 # ⚙️ 自动清仓配置
 # ======================================================
-POSITION_CHECK_INTERVAL = 3       # 持仓检查间隔（秒）
+POSITION_CHECK_INTERVAL = 5       # 持仓检查间隔（秒），从3改为5降低API压力
 MIN_POSITION_TO_CLOSE   = 5.0      # 最小清仓阈值（shares）
 CLOSE_PRICE_OFFSET      = 0.01     # 清仓价格偏移（best_bid - 此值，确保成交）
 
@@ -59,15 +59,15 @@ SPREAD_CHECK_INTERVAL   = 60       # 插队检测间隔（秒）
 # ======================================================
 # ⚙️ 监控防御配置
 # ======================================================
-THRESHOLD_FRONT_DEPTH_DROP      = 0.20   # 前墙单轮跌幅触发阈值
-THRESHOLD_SAME_DEPTH_DROP       = 0.50   # 同档单轮跌幅触发阈值
-THRESHOLD_FRONT_HIGH_WATER_DROP = 0.50   # 前墙高水位跌幅触发阈值
+THRESHOLD_FRONT_DEPTH_DROP      = 0.30   # 前墙单轮跌幅触发阈值（原0.20太敏感，正常波动就20-30%）
+THRESHOLD_SAME_DEPTH_DROP       = 0.50   # 同档(别人的)单轮跌幅触发阈值
+THRESHOLD_FRONT_HIGH_WATER_DROP = 0.50   # 前墙高水位跌幅触发阈值（原0.50稍敏感）
 THRESHOLD_SAME_HIGH_WATER_DROP  = 0.60   # 同档高水位跌幅触发阈值
-MIN_SAME_DEPTH_SAFE             = 100.0  # 同档安全深度（USDC），低于此值触发撤单
+MIN_SAME_DEPTH_SAFE             = 100.0   # 同档安全深度（USDC，排除自己后），别人的深度低于此值触发撤单
 MIN_FRONT_DEPTH_THRESHOLD       = 100.0  # 前墙有无判断阈值（USDC）
-MIN_FRONT_DEPTH_ABSOLUTE        = 50.0   # 前墙绝对兜底线（USDC），低于此值直接撤单
+MIN_FRONT_DEPTH_ABSOLUTE        = 100.0   # 前墙绝对兜底线（USDC），低于此值直接撤单（原50太高）
 MIN_FRONT_DEPTH_ABSOLUTE_REF    = 0.0    # 设为0：历史高水位>0永远成立，等于直接启用绝对兜底
-MONITOR_CHECK_INTERVAL          = 1
+MONITOR_CHECK_INTERVAL          = 2      # 扫描间隔3秒，降低API压力
 ENABLE_AUTO_DEFENSE             = True
 MAX_CONCURRENT_WORKERS          = 10
 ORDERBOOK_TIMEOUT               = 5
@@ -331,40 +331,6 @@ def load_strategy_markets() -> List[Dict]:
                 print(f"   ⚠️ '{STRATEGY_SHEET_NAME}' 表格为空")
         except Exception as e:
             print(f"   ⚠️ 读取 '{STRATEGY_SHEET_NAME}' 失败: {e}")
-
-        # ── 2. Chain Rewards Alert（带波动率筛选）─────────────────
-        # 链上赞助奖励市场：先读取，再通过波动率筛选过滤高波动市场
-        print(f"   📋 读取 '{CHAIN_REWARDS_SHEET_NAME}' ...")
-        try:
-            wk2 = sh.worksheet(CHAIN_REWARDS_SHEET_NAME)
-            df2 = pd.DataFrame(wk2.get_all_records())
-            if not df2.empty:
-                # 波动率筛选：如果表格中有 volatility_sum 列，过滤掉高波动市场
-                if 'volatility_sum' in df2.columns:
-                    df2['volatility_sum'] = pd.to_numeric(df2['volatility_sum'], errors='coerce').fillna(0)
-                    before_filter = len(df2)
-                    df2 = df2[df2['volatility_sum'] < 50].reset_index(drop=True)
-                    filtered_out = before_filter - len(df2)
-                    if filtered_out > 0:
-                        print(f"   🔍 波动率筛选: 过滤掉 {filtered_out} 个高波动市场 (volatility_sum >= 50)")
-                # spread 筛选：过滤掉点差过宽的市场
-                if 'spread' in df2.columns:
-                    df2['spread'] = pd.to_numeric(df2['spread'], errors='coerce').fillna(0)
-                    before_filter = len(df2)
-                    df2 = df2[df2['spread'] <= 0.08].reset_index(drop=True)
-                    filtered_out = before_filter - len(df2)
-                    if filtered_out > 0:
-                        print(f"   🔍 点差筛选: 过滤掉 {filtered_out} 个宽点差市场 (spread > 0.08)")
-                if not df2.empty:
-                    n2 = _parse_sheet_tokens(df2, "Chain Rewards", tokens, seen_token_ids,
-                                              max_spread_unit_cents=True)
-                    print(f"   ✅ '{CHAIN_REWARDS_SHEET_NAME}': 筛选后 {len(df2)} 行 → {n2} 个新 token")
-                else:
-                    print(f"   ⚠️ '{CHAIN_REWARDS_SHEET_NAME}' 筛选后无符合条件的市场")
-            else:
-                print(f"   ⚠️ '{CHAIN_REWARDS_SHEET_NAME}' 表格为空（reward_monitor 尚未写入）")
-        except Exception as e:
-            print(f"   ⚠️ 读取 '{CHAIN_REWARDS_SHEET_NAME}' 失败（可能尚未创建）: {e}")
 
         print(f"   ✅ 合并后共 {len(tokens)} 个 token（已去重）")
         print(f"{'='*60}\n")
@@ -695,6 +661,9 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
 
         if buy_ok or sell_ok:
             success_count += 1
+            # 🔥 保存实际挂单量到 token_info，供防御模块排除自己
+            if result.get("order_size"):
+                token_info["order_size"] = result["order_size"]
             buy_info  = f"买{result['buy_tier']}(${result['buy_price']:.3f})"  if buy_ok  else "买单跳过"
             sell_info = f"卖{result['sell_tier']}(${result['sell_price']:.3f})" if sell_ok else "卖单跳过"
             extreme_tag = " [极端价格✓]" if result.get("extreme_price") else ""
@@ -941,20 +910,31 @@ async def auto_close_positions_task(strategy_tokens: list):
             if all_positions is None or len(all_positions) == 0:
                 continue
 
-            # 筛选在监控列表中且持仓 >= 阈值的 token
+            # 🔥 监视所有持仓（不限于列表），手动挂单也能自动清仓
             positions_found = []
             for _, row in all_positions.iterrows():
                 asset = str(row.get('asset', ''))
                 size  = float(row.get('size', 0))
-                if asset in token_map and size >= MIN_POSITION_TO_CLOSE:
-                    t = token_map[asset]
-                    positions_found.append({
-                        "token_id":   asset,
-                        "token_type": t["token_type"],
-                        "question":   t["question"],
-                        "shares":     size,
-                        "neg_risk":   t.get("neg_risk", False),
-                    })
+                if size >= MIN_POSITION_TO_CLOSE:
+                    if asset in token_map:
+                        # 列表中的 token：使用已知信息
+                        t = token_map[asset]
+                        positions_found.append({
+                            "token_id":   asset,
+                            "token_type": t["token_type"],
+                            "question":   t["question"],
+                            "shares":     size,
+                            "neg_risk":   t.get("neg_risk", False),
+                        })
+                    else:
+                        # 手动挂单的 token：使用默认值
+                        positions_found.append({
+                            "token_id":   asset,
+                            "token_type": "MANUAL",
+                            "question":   f"手动挂单 ({asset[:10]}...)",
+                            "shares":     size,
+                            "neg_risk":   False,
+                        })
 
             if not positions_found:
                 continue
@@ -1013,6 +993,7 @@ class MarketState:
         self.token_type = token_type
         self.my_bid_price = None
         self.my_ask_price = None
+        self.my_order_size = 0.0  # 我的挂单量（shares），用于从同档深度中排除自己
         self.last_bid_front_depth = 0
         self.last_bid_same_depth = 0
         self.last_ask_front_depth = 0
@@ -1035,6 +1016,10 @@ def get_all_my_orders_once(poly_client: PolymarketClient):
         orders = poly_client.client.get_orders()
         grouped = defaultdict(lambda: {'bids': [], 'asks': []})
         for o in orders:
+            # 🔥 只处理 LIVE 状态的订单，过滤掉已取消/已成交的历史订单
+            status = str(o.get('status', '')).upper()
+            if status and status != 'LIVE':
+                continue
             token_id = o.get('token_id') or o.get('asset_id')
             if not token_id:
                 continue
@@ -1221,6 +1206,28 @@ async def monitor_defense_loop(strategy_tokens: list):
                     market_states[t["token_id"]] = MarketState(t["question"], t["token_type"])
 
             all_orders = await asyncio.to_thread(get_all_my_orders_once, poly_client)
+
+            # 🔥 自动发现所有挂单（包括手动挂单），不限于 strategy_tokens 列表
+            known_token_ids = {t["token_id"] for t in current_tokens}
+            for token_id in all_orders:
+                if token_id not in known_token_ids:
+                    # 手动挂单的 token：自动创建临时 token_info 并加入监控
+                    manual_token = {
+                        "token_id":       token_id,
+                        "token_type":     "MANUAL",
+                        "question":       f"手动挂单 ({token_id[:10]}...)",
+                        "min_size":       10.0,
+                        "neg_risk":       False,
+                        "max_spread":     None,
+                        "volatility_sum": 0.0,
+                        "source":         "manual_detected",
+                    }
+                    current_tokens.append(manual_token)
+                    known_token_ids.add(token_id)
+                    # 为手动挂单创建 MarketState
+                    if token_id not in market_states:
+                        market_states[token_id] = MarketState(manual_token["question"], manual_token["token_type"])
+
             active_targets = [t for t in current_tokens if all_orders.get(t["token_id"], (None, None)) != (None, None)]
 
             if not active_targets:
@@ -1263,7 +1270,20 @@ async def monitor_defense_loop(strategy_tokens: list):
 
                 state.my_bid_price = my_bid_price
                 state.my_ask_price = my_ask_price
+
+                # 获取我的挂单量（用于从同档深度中排除自己）
+                order_size = t.get("order_size") or t.get("min_size", 500.0)
+                state.my_order_size = order_size
+
                 bid_front, bid_same, ask_front, ask_same = calculate_layered_depth(book, my_bid_price, my_ask_price)
+
+                # 🔥 从同档深度中排除自己的挂单量，只看"别人的深度"
+                if my_bid_price is not None and my_bid_price > 0:
+                    my_bid_value = order_size * my_bid_price
+                    bid_same = max(0, bid_same - my_bid_value)
+                if my_ask_price is not None and my_ask_price > 0:
+                    my_ask_value = order_size * my_ask_price
+                    ask_same = max(0, ask_same - my_ask_value)
 
                 state.bid_front_high_water = max(state.bid_front_high_water, bid_front)
                 state.bid_same_high_water  = max(state.bid_same_high_water,  bid_same)
