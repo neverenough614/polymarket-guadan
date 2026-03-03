@@ -281,13 +281,33 @@ def add_volatility(row):
         history = res.json().get('history', [])
         if not history:
             row_dict = row.copy()
-            stats = {k: 0 for k in ['1_hour', '3_hour', '6_hour', '12_hour', '24_hour', '7_day', '14_day', '30_day', 'volatility_price']}
+            stats = {k: 0 for k in ['1_hour', '3_hour', '6_hour', '12_hour', '24_hour', '7_day', '14_day', '30_day', 'volatility_price', 'burst_index']}
             return {**row_dict, **stats}
             
         price_df = pd.DataFrame(history)
         price_df['t'] = pd.to_datetime(price_df['t'], unit='s')
         price_df['p'] = price_df['p'].round(2)
         price_df['log_return'] = np.log(price_df['p'] / price_df['p'].shift(1))
+
+        # 计算 burst_index：仅在「非零变动」上统计集中度，避免大量 0 导致指数全接近 1
+        rets = price_df['log_return'].dropna().values
+        burst_index = 0.0
+        abs_rets = np.abs(rets)
+        abs_rets_nz = abs_rets[abs_rets > 1e-6]
+        N_min = 20
+        alpha = 0.8
+        if len(abs_rets_nz) < N_min:
+            burst_index = 0.0
+        else:
+            S = abs_rets_nz.sum()
+            if S > 0:
+                sorted_abs = np.sort(abs_rets_nz)[::-1]
+                cumsum = np.cumsum(sorted_abs)
+                threshold = alpha * S
+                k = int((cumsum >= threshold).argmax()) + 1
+                f = k / len(abs_rets_nz)
+                burst_index = float(max(0.0, min(1.0, 1.0 - f)))
+
         row_dict = row.copy()
         stats = {
             '1_hour': calculate_annualized_volatility(price_df, 1),
@@ -298,7 +318,8 @@ def add_volatility(row):
             '7_day': calculate_annualized_volatility(price_df, 24 * 7),
             '14_day': calculate_annualized_volatility(price_df, 24 * 14),
             '30_day': calculate_annualized_volatility(price_df, 24 * 30),
-            'volatility_price': price_df['p'].iloc[-1] if not price_df.empty else 0
+            'volatility_price': price_df['p'].iloc[-1] if not price_df.empty else 0,
+            'burst_index': burst_index,
         }
         return {**row_dict, **stats}
     except:

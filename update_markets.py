@@ -16,6 +16,9 @@ from gspread_dataframe import set_with_dataframe
 # 奖励快照文件路径（用于跨轮次对比）
 REWARD_SNAPSHOT_FILE = "reward_snapshot.json"
 
+# Rust 策略 JSON 导出路径
+RUST_STRATEGY_JSON_PATH = os.path.join(os.path.dirname(__file__), "poly_maker_rs", "strategy_tokens.json")
+
 # ================= Global Setup =================
 spreadsheet = get_spreadsheet()
 client = get_clob_client()
@@ -168,6 +171,123 @@ def fetch_reward_changes(m_data: pd.DataFrame) -> pd.DataFrame:
                  'gm_reward_per_100', 'spread', 'volume', 'token1', 'token2', 'condition_id', 'detected_at']
     col_order = [c for c in col_order if c in df.columns]
     return df[col_order]
+
+
+# ================= Rust JSON 自动导出 =================
+
+def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataFrame):
+    """
+    将 Normal LP 和 High Reward Aggressive 策略表导出为 Rust 版本使用的 strategy_tokens.json。
+    与 main.py 的 _parse_sheet_tokens() 使用相同的解析逻辑。
+    注意：不应用黑名单过滤（Rust 版本自行处理黑名单，标记 blacklisted 而非跳过）。
+    """
+    tokens = []
+    seen_token_ids = {}
+
+    def _find_col(df, name):
+        for col in df.columns:
+            if col.lower().replace(" ", "_") == name.lower().replace(" ", "_"):
+                return col
+        return None
+
+    def _parse_df(df, source_label):
+        if df is None or df.empty:
+            return 0
+
+        min_size_col = _find_col(df, "min_size")
+        neg_risk_col = _find_col(df, "neg_risk")
+        max_spread_col = _find_col(df, "max_spread")
+        vol_col = _find_col(df, "volatility_sum")
+
+        added = 0
+        for _, row in df.iterrows():
+            question = str(row.get("question", "Unknown")).strip()
+            if not question or question.lower() in ("", "nan", "none"):
+                continue
+            # 跳过占位行
+            if "当前无" in question:
+                continue
+
+            # min_size
+            try:
+                min_size = float(str(row.get(min_size_col, 10)).replace(",", "")) if min_size_col else 10.0
+                if min_size <= 0:
+                    min_size = 10.0
+            except Exception:
+                min_size = 10.0
+
+            # neg_risk
+            neg_risk = False
+            if neg_risk_col:
+                nr_val = str(row.get(neg_risk_col, "")).strip().lower()
+                neg_risk = nr_val in ("true", "1", "yes")
+
+            # max_spread（表格中单位是美分，需 /100）
+            max_spread = None
+            if max_spread_col:
+                try:
+                    ms_val = str(row.get(max_spread_col, "")).strip()
+                    if ms_val and ms_val.lower() not in ("", "nan", "none", "0"):
+                        raw = float(ms_val)
+                        if raw > 0:
+                            max_spread = raw / 100.0  # 美分 → 小数
+                except Exception:
+                    max_spread = None
+
+            # volatility_sum
+            vol_sum = 0.0
+            if vol_col:
+                try:
+                    vol_sum = float(str(row.get(vol_col, 0)).replace(",", ""))
+                except Exception:
+                    vol_sum = 0.0
+
+            def add_token(token_id, token_type):
+                nonlocal added
+                if token_id not in seen_token_ids:
+                    seen_token_ids[token_id] = len(tokens)
+                    tokens.append({
+                        "token_id": token_id,
+                        "token_type": token_type,
+                        "question": question,
+                        "min_size": min_size,
+                        "neg_risk": neg_risk,
+                        "max_spread": max_spread,
+                        "volatility_sum": vol_sum,
+                        "source": source_label,
+                    })
+                    added += 1
+                else:
+                    idx = seen_token_ids[token_id]
+                    tokens[idx]["min_size"] = max(tokens[idx]["min_size"], min_size)
+                    if max_spread is not None:
+                        tokens[idx]["max_spread"] = max_spread
+
+            t1 = str(row.get("token1", "")).strip()
+            if t1 and len(t1) > 10 and t1.lower() != "nan":
+                add_token(t1, "YES")
+
+            if "token2" in df.columns:
+                t2 = str(row.get("token2", "")).strip()
+                if t2 and len(t2) > 10 and t2.lower() != "nan":
+                    add_token(t2, "NO")
+
+        return added
+
+    n1 = _parse_df(normal_df, "Normal LP")
+    n2 = _parse_df(aggressive_df, "High Reward")
+
+    if not tokens:
+        print("⚠️ [Rust JSON] 无 token 可导出，跳过")
+        return
+
+    try:
+        with open(RUST_STRATEGY_JSON_PATH, 'w', encoding='utf-8') as f:
+            json.dump(tokens, f, indent=2, ensure_ascii=False)
+        print(f"✅ [Rust JSON] 已导出 {len(tokens)} 个 token → {RUST_STRATEGY_JSON_PATH}")
+        print(f"   Normal LP: {n1}, High Reward: {n2}")
+    except Exception as e:
+        print(f"⚠️ [Rust JSON] 导出失败: {e}")
 
 
 # ================= Helper Functions =================
@@ -385,6 +505,14 @@ def fetch_and_process_data():
         except Exception as e:
             print(f"Error updating sheets: {e}")
             traceback.print_exc()
+
+        # ================== 自动导出 Rust strategy_tokens.json ==================
+        try:
+            export_strategy_tokens_json(normal_lp_df, aggressive_df)
+        except Exception as e:
+            print(f"⚠️ [Rust JSON] 导出异常: {e}")
+            traceback.print_exc()
+
     else:
         print("No data found to update.")
 
