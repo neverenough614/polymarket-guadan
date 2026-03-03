@@ -28,14 +28,14 @@ AGGRESSIVE_SHEET_NAME    = "High Reward Aggressive"  # 高奖励激进策略（�
 # 主要过滤：军事打击类、政治演讲单日事件、地缘政治占领/封锁类
 QUESTION_BLACKLIST_KEYWORDS = [
     # 军事打击类
-    # "strikes", "strike", "attack", "attacks", "bomb", "missile", "nuclear strike",
-    # 地缘政治占领/封锁类
-     #"capture", "invade", "invasion", "Strait of Hormuz","Iran","aliens","Iranian",
+     "strikes", "strike", "attack", "attacks", "bomb", "missile", "nuclear strike",
+    #地缘政治占领/封锁类
+     "capture", "invade", "invasion", "Strait of Hormuz","Iran","aliens","Iranian",
     # 政治演讲单日事件
-    # "State of the Union", 'say "', "tweets", "tweet",
+     "State of the Union", 'say "', "tweets", "tweet",
 ]
-DEPTH_THRESHOLD_TIER1   = 200.0    # 第1档深度阈值（USDC）
-DEPTH_THRESHOLD_TIER2   = 100.0    # 第2、3档深度阈值（USDC）
+DEPTH_THRESHOLD_TIER1   = 1500.0   # 第1档深度阈值（USDC），提高门槛确保只有深厚市场才挂第一档
+DEPTH_THRESHOLD_TIER2   = 200.0    # 第2、3档深度阈值（USDC）
 EXTREME_PRICE_THRESHOLD = 0.10     # 极端价格阈值（<0.10 或 >0.90 必须双向挂单）
 RETRY_INTERVAL          = 300      # 深度不足重试间隔（秒，5分钟）
 SHEET_RELOAD_INTERVAL   = 300      # 表格重载间隔（秒）
@@ -54,7 +54,7 @@ MAX_ORDER_SIZE          = 500.0    # 默认上限
 # ======================================================
 # ⚙️ 自动清仓配置
 # ======================================================
-POSITION_CHECK_INTERVAL = 5       # 持仓检查间隔（秒），从3改为5降低API压力
+POSITION_CHECK_INTERVAL = 3       # 持仓检查间隔（秒），从3改为5降低API压力
 MIN_POSITION_TO_CLOSE   = 5.0      # 最小清仓阈值（shares）
 CLOSE_PRICE_OFFSET      = 0.01     # 清仓价格偏移（best_bid - 此值，确保成交）
 
@@ -66,11 +66,11 @@ SPREAD_CHECK_INTERVAL   = 60       # 插队检测间隔（秒）
 # ======================================================
 # ⚙️ 监控防御配置
 # ======================================================
-THRESHOLD_FRONT_DEPTH_DROP      = 0.30   # 前墙单轮跌幅触发阈值（原0.20太敏感，正常波动就20-30%）
-THRESHOLD_SAME_DEPTH_DROP       = 0.50   # 同档(别人的)单轮跌幅触发阈值
+THRESHOLD_FRONT_DEPTH_DROP      = 0.20   # 前墙单轮跌幅触发阈值（原0.20太敏感，正常波动就20-30%）
+THRESHOLD_SAME_DEPTH_DROP       = 0.10   # 同档(别人的)单轮跌幅触发阈值
 THRESHOLD_FRONT_HIGH_WATER_DROP = 0.50   # 前墙高水位跌幅触发阈值（原0.50稍敏感）
-THRESHOLD_SAME_HIGH_WATER_DROP  = 0.60   # 同档高水位跌幅触发阈值
-MIN_SAME_DEPTH_SAFE             = 100.0   # 同档安全深度（USDC，排除自己后），别人的深度低于此值触发撤单
+THRESHOLD_SAME_HIGH_WATER_DROP  = 0.50   # 同档高水位跌幅触发阈值
+MIN_SAME_DEPTH_SAFE             = 200.0   # 同档安全深度（USDC，排除自己后），别人的深度低于此值触发撤单
 MIN_FRONT_DEPTH_THRESHOLD       = 100.0  # 前墙有无判断阈值（USDC）
 MIN_FRONT_DEPTH_ABSOLUTE        = 100.0   # 前墙绝对兜底线（USDC），低于此值直接撤单（原50太高）
 MIN_FRONT_DEPTH_ABSOLUTE_REF    = 0.0    # 设为0：历史高水位>0永远成立，等于直接启用绝对兜底
@@ -235,16 +235,17 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
         if not question or question.lower() in ('', 'nan', 'none'):
             continue
 
-        # 关键词黑名单过滤（大小写不敏感）
+        # 关键词黑名单过滤（大小写不敏感）→ 不跳过，标记为跳过第一档
         question_lower = question.lower()
         matched_kw = next(
             (kw for kw in QUESTION_BLACKLIST_KEYWORDS if kw.lower() in question_lower),
             None
         )
+        is_blacklisted = False
         if matched_kw:
             skipped_blacklist += 1
-            print(f"   🚫 [黑名单] 跳过: {question[:55]}... (命中: '{matched_kw}')")
-            continue
+            is_blacklisted = True
+            print(f"   ⚠️ [黑名单] 标记: {question[:55]}... (命中: '{matched_kw}') → 跳过第一档，从第二档开始")
 
         # min_size
         try:
@@ -294,6 +295,7 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
                     "max_spread":     max_spread,
                     "volatility_sum": vol_sum,
                     "source":         source_label,
+                    "blacklisted":    is_blacklisted,
                 })
                 added += 1
             else:
@@ -402,7 +404,8 @@ MAX_LEVEL_GAP = 0.02  # 2c（Normal LP 市场 spread 2-6c，档位间距 2c 是�
 def analyze_best_place_price_from_book(book, side: str,
                                         max_spread: Optional[float] = None,
                                         mid: Optional[float] = None,
-                                        order_size: Optional[float] = None):
+                                        order_size: Optional[float] = None,
+                                        skip_tier1: bool = False):
     """
     从已有的订单簿对象分析最优挂单价格（不再重复请求 API）。
     - 第1档需要深度 >= DEPTH_THRESHOLD_TIER1 (200 USDC)
@@ -410,6 +413,7 @@ def analyze_best_place_price_from_book(book, side: str,
     - 如果提供了 max_spread 和 mid，则只选择在 [mid-max_spread, mid+max_spread] 范围内的档位
     - 前三档任意相邻档位价差 > MAX_LEVEL_GAP (2c) 则跳过（流动性不连续，被吃损失过大）
     - 如果提供了 order_size，第1档额外检查：挂单价值不超过该档深度的 50%，否则跳到第2档
+    - skip_tier1: 黑名单市场强制跳过第一档，从第二档开始挂单
     返回 (price, tier, depth) 或 None
     """
     try:
@@ -440,6 +444,10 @@ def analyze_best_place_price_from_book(book, side: str,
                     return None
 
         for i, level in enumerate(levels[:3]):
+            # 🚫 黑名单市场强制跳过第一档
+            if i == 0 and skip_tier1:
+                continue
+
             price = float(level.price)
             size = float(level.size)
             depth = price * size
@@ -448,12 +456,19 @@ def analyze_best_place_price_from_book(book, side: str,
             if depth < threshold:
                 continue
 
-            # ── 第一档占比检查：挂单价值不超过该档深度的 50% ──────────────
-            # 第二、三档有前面的保护，不做占比检查
-            if i == 0 and order_size is not None:
-                my_order_value = order_size * price
-                if my_order_value > depth * (1/3):
-                    continue  # 占比超过 1/3（33.3%），跳过第一档，尝试第二档
+            # ── 第一档额外安全检查 ──────────────────────────────────
+            if i == 0:
+                # 孤立厚墙检测：第1档/第2档深度比 > 5，说明是大户撑场，跳过
+                if len(levels) >= 2:
+                    tier2_depth = float(levels[1].price) * float(levels[1].size)
+                    if tier2_depth > 0 and depth / tier2_depth > 5.0:
+                        continue  # 第1档深度异常集中于单一档位，跳过
+
+                # 占比检查：挂单价值不超过该档深度的 20%（原1/3，更保守）
+                if order_size is not None:
+                    my_order_value = order_size * price
+                    if my_order_value > depth * (1/5):
+                        continue  # 占比超过 20%，跳过第一档，尝试第二档
 
             # max_spread 范围检测
             if max_spread is not None and mid is not None:
@@ -593,8 +608,10 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
         result["extreme_price"] = extreme
 
         # 复用同一个 book 对象分析买卖最优档位（不再重复请求 API）
-        buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size)
-        sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size)
+        # 🚫 黑名单市场跳过第一档，从第二档开始挂单
+        blacklisted = token_info.get("blacklisted", False)
+        buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=blacklisted)
+        sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=blacklisted)
 
         if extreme:
             # 极端价格市场：必须买卖双向都满足深度条件，否则整个跳过
@@ -644,7 +661,7 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
 # ======================================================
 # 🚀 批量自动挂单（并发版，最多5线程）
 # ======================================================
-PLACE_ORDER_WORKERS = 5  # 并发挂单线程数（避免 API 限流）
+PLACE_ORDER_WORKERS = 8  # 并发挂单线程数（避免 API 限流）
 
 def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
     global placed_orders_log, pending_retry_tokens
@@ -1353,7 +1370,7 @@ async def monitor_defense_loop(strategy_tokens: list):
                         state.reset_high_water()
 
                         # 🔄 撤单后等待市场稳定，再尝试重新挂单
-                        await asyncio.sleep(30)
+                        await asyncio.sleep(60)
                         token_info_replace = next((t for t in current_tokens if t["token_id"] == token_id), None)
                         if token_info_replace:
                             print(f"🔄 [防御后重挂] 正在重新检验挂单条件: {state.question[:40]}...")

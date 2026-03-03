@@ -189,13 +189,13 @@ def clean_and_prepare_data(df):
     统一的数据清洗和类型转换
     """
     sdf = df.copy()
-    
+
     # === [修改点 1] 定义所有波动率列名 ===
     vol_cols = ['1_hour', '3_hour', '6_hour', '12_hour', '24_hour', '7_day', '30_day']
-    
+
     # 确保关键指标是数值型 (加入 vol_cols 以便排序)
-    numeric_cols = ['spread', 'gm_reward_per_100', 'mid_reward_per_100', 'volatility_sum', 'best_bid', 'best_ask', 'volume'] + vol_cols
-    
+    numeric_cols = ['spread', 'gm_reward_per_100', 'mid_reward_per_100', 'volatility_sum', 'burst_index', 'best_bid', 'best_ask', 'volume'] + vol_cols
+
     for col in numeric_cols:
         if col in sdf.columns:
             sdf[col] = pd.to_numeric(sdf[col], errors='coerce').fillna(0)
@@ -208,9 +208,9 @@ def clean_and_prepare_data(df):
     
     # === [修改点 2] 将详细波动率加入显示列表 ===
     priority_cols = [
-        'question', 'mid_rv_ratio', 'rv_ratio', 'mid_reward_per_100', 'gm_reward_per_100', 'spread', 
-        'volatility_sum'] + vol_cols + [ # 把详细波动率插在这里
-        'volume', 'days_to_expiry', 
+        'question', 'mid_rv_ratio', 'rv_ratio', 'mid_reward_per_100', 'gm_reward_per_100', 'spread',
+        'volatility_sum'] + vol_cols + [  # 把详细波动率插在这里
+        'burst_index', 'volume', 'days_to_expiry',
         'best_bid', 'best_ask', 'answer1', 'market_slug', 'end_date'
     ]
     
@@ -303,19 +303,22 @@ def fetch_and_process_data():
     ].sort_values('gm_reward_per_100', ascending=False)
 
     # --- 策略 2: 正常稳健策略 (Normal LP) ---
-    # 目标：博稳定，低波动、窄点差，被吃单亏损小
-    # 要求：0.02 <= Spread <= 0.04（收窄，降低被吃单亏损）
-    # 波动率 < 30（收紧，过滤高波动市场）
-    # 奖励筛选：mid_reward_per_100 > 0.3 或 gm_reward_per_100 > 0.5
-    # 到期：>7天 或无到期日
+    # 条件：mid_reward_per_100 >= 0.5；burst_index <= 0.5；24_hour <= 25（日级波动可控）
+    # 保留：0.02 <= Spread <= 0.04，到期 >7天 或无到期日
     # 排序：mid_rv_ratio 降序
-    normal_lp_df = master_df[
-        (master_df['spread'] >= 0.02) & 
-        (master_df['spread'] <= 0.04) & 
-        (master_df['volatility_sum'] < 30) & 
-        ((master_df['mid_reward_per_100'] > 0.3) | (master_df['gm_reward_per_100'] > 0.5)) &
+    _has_24h = '24_hour' in master_df.columns
+    _has_burst = 'burst_index' in master_df.columns
+    normal_mask = (
+        (master_df['spread'] >= 0.01) &
+        (master_df['spread'] <= 0.04) &
+        (master_df['mid_reward_per_100'] >= 0.5) &
         ((master_df['days_to_expiry'] > 7) | (master_df['days_to_expiry'] == 0))
-    ].sort_values('mid_rv_ratio', ascending=False)
+    )
+    if _has_burst:
+        normal_mask = normal_mask & (master_df['burst_index'] <= 0.5)
+    if _has_24h:
+        normal_mask = normal_mask & (master_df['24_hour'] <= 25)
+    normal_lp_df = master_df[normal_mask].sort_values('mid_rv_ratio', ascending=False)
 
     # --- 策略 3: 高奖励激进策略 (High Reward Aggressive) ---
     # 目标：博收益，刀口舔血，高奖励覆盖风险，靠防御快速撤单
