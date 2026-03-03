@@ -52,7 +52,7 @@ ENABLE_AUTO_PLACE       = True     # 是否启用自动挂单
 # 动态挂单量配置（分策略）
 # Normal LP：稳健策略，占比大、挂单量高
 NORMAL_SIZE_RATIO       = 0.30     # Normal LP 占前三档总深度 30%
-NORMAL_MAX_ORDER_SIZE   = 700.0    # Normal LP 最大 700 shares
+NORMAL_MAX_ORDER_SIZE   = 800.0    # Normal LP 最大 700 shares
 # High Reward：激进策略，占比小、挂单量低
 AGGRESSIVE_SIZE_RATIO   = 0.08     # High Reward 占前三档总深度 8%
 AGGRESSIVE_MAX_ORDER_SIZE = 300.0  # High Reward 最大 300 shares
@@ -82,10 +82,18 @@ MIN_SAME_DEPTH_SAFE             = 200.0   # 同档安全深度（USDC，排除�
 MIN_FRONT_DEPTH_THRESHOLD       = 100.0  # 前墙有无判断阈值（USDC）
 MIN_FRONT_DEPTH_ABSOLUTE        = 100.0   # 前墙绝对兜底线（USDC），低于此值直接撤单（原50太高）
 MIN_FRONT_DEPTH_ABSOLUTE_REF    = 0.0    # 设为0：历史高水位>0永远成立，等于直接启用绝对兜底
-MONITOR_CHECK_INTERVAL          = 2      # 扫描间隔3秒，降低API压力
+MONITOR_CHECK_INTERVAL          = 1      # 扫描间隔3秒，降低API压力
 ENABLE_AUTO_DEFENSE             = True
 MAX_CONCURRENT_WORKERS          = 10
 ORDERBOOK_TIMEOUT               = 5
+
+# ======================================================
+# ⚖️ 偏斜检测配置（买卖深度严重不对称时撤掉危险方向的单）
+# ======================================================
+ENABLE_IMBALANCE_DETECTION      = True       # 是否启用偏斜检测
+IMBALANCE_THRESHOLD             = 0.30       # 偏斜阈值：某一边深度占比低于 30% 则触发
+IMBALANCE_DEPTH_LEVELS          = 5          # 计算偏斜时使用前 N 档深度
+IMBALANCE_MIN_TOTAL_DEPTH       = 500.0      # 买卖总深度低于此值时不检测（避免小市场误触发）
 
 # ======================================================
 # 🔥 FastAPI Dashboard
@@ -755,7 +763,12 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
             print(f"{label} ❌ 买={result.get('buy_status','?')[:25]} | 卖={result.get('sell_status','?')[:25]}")
 
     with pending_retry_lock:
-        pending_retry_tokens = new_pending
+        # 本次重试涉及的 token ID（避免覆盖防御撤单新加入的 token）
+        retried_ids = set(results_map.keys())
+        # 保留不在本次重试范围内的 token（比如防御撤单期间新加入的）
+        kept = [t for t in pending_retry_tokens if t["token_id"] not in retried_ids]
+        # 合并：本次重试仍失败的 + 其他保留的
+        pending_retry_tokens[:] = new_pending + kept
 
     print(f"\n{'='*60}")
     print(f"📊 [自动挂单] 完成！成功: {success_count} 个，跳过/失败: {skip_count} 个")
@@ -1336,6 +1349,65 @@ async def monitor_defense_loop(strategy_tokens: list):
                 state.my_bid_price = my_bid_price
                 state.my_ask_price = my_ask_price
 
+                # ── ⚖️ 偏斜检测（买卖深度严重不对称时撤单）──────────────
+                if ENABLE_IMBALANCE_DETECTION and not state.first_run:
+                    bids_top = sorted(book.bids, key=lambda x: float(x.price), reverse=True)[:IMBALANCE_DEPTH_LEVELS]
+                    asks_top = sorted(book.asks, key=lambda x: float(x.price), reverse=False)[:IMBALANCE_DEPTH_LEVELS]
+                    imb_bid_depth = sum(float(b.price) * float(b.size) for b in bids_top)
+                    imb_ask_depth = sum(float(a.price) * float(a.size) for a in asks_top)
+                    imb_total = imb_bid_depth + imb_ask_depth
+
+                    if imb_total >= IMBALANCE_MIN_TOTAL_DEPTH:
+                        bid_ratio = imb_bid_depth / imb_total
+                        ask_ratio = imb_ask_depth / imb_total
+
+                        imbalance_triggered = False
+                        if bid_ratio < IMBALANCE_THRESHOLD and my_bid_price is not None:
+                            imbalance_triggered = True
+                            print(f"\n\n{'⚖'*10} 买卖深度偏斜检测 {'⚖'*10}")
+                            print(f"⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                            print(f"🎯 目标: [{t['token_type']}] {t['question'][:45]}...")
+                            print(f"   🚨 [偏斜] 买方深度严重不足！买/卖={bid_ratio:.0%}/{ask_ratio:.0%} (${imb_bid_depth:.0f}/${imb_ask_depth:.0f})，价格可能下跌 → 撤单")
+                        elif ask_ratio < IMBALANCE_THRESHOLD and my_ask_price is not None:
+                            imbalance_triggered = True
+                            print(f"\n\n{'⚖'*10} 买卖深度偏斜检测 {'⚖'*10}")
+                            print(f"⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                            print(f"🎯 目标: [{t['token_type']}] {t['question'][:45]}...")
+                            print(f"   🚨 [偏斜] 卖方深度严重不足！买/卖={bid_ratio:.0%}/{ask_ratio:.0%} (${imb_bid_depth:.0f}/${imb_ask_depth:.0f})，价格可能上涨 → 撤单")
+
+                        if imbalance_triggered and ENABLE_AUTO_DEFENSE:
+                            await asyncio.to_thread(cancel_specific_token_monitor, poly_client, token_id, t["question"], t["token_type"])
+                            state.first_run = True
+                            state.reset_high_water()
+                            # 🔄 加入重试队列
+                            token_info_imb = next((x for x in current_tokens if x["token_id"] == token_id), None)
+                            if token_info_imb:
+                                with pending_retry_lock:
+                                    existing_ids = {x["token_id"] for x in pending_retry_tokens}
+                                    if token_info_imb["token_id"] not in existing_ids:
+                                        pending_retry_tokens.append(token_info_imb)
+                                print(f"   📋 已加入重试队列（{len(pending_retry_tokens)} 个待重试）")
+                            # 💰 紧急清仓检查
+                            try:
+                                all_positions = await asyncio.to_thread(poly_client.get_all_positions)
+                                if all_positions is not None:
+                                    for _, pos_row in all_positions.iterrows():
+                                        if str(pos_row.get('asset', '')) == token_id:
+                                            pos_shares = float(pos_row.get('size', 0))
+                                            if pos_shares >= MIN_POSITION_TO_CLOSE:
+                                                close_book = all_books.get(token_id)
+                                                if close_book and close_book.bids:
+                                                    close_bids = sorted(close_book.bids, key=lambda x: float(x.price), reverse=True)
+                                                    close_best_bid = float(close_bids[0].price)
+                                                    close_price = max(0.01, round(close_best_bid - CLOSE_PRICE_OFFSET, 2))
+                                                    print(f"   💰 [紧急清仓] 发现持仓 {pos_shares:.1f} shares，立即清仓 @ ${close_price:.3f}")
+                                                    await asyncio.to_thread(poly_client.create_order, token_id, "SELL", close_price, pos_shares, t.get("neg_risk", False))
+                                                    break
+                            except Exception as close_e:
+                                print(f"   ⚠️ [紧急清仓] 失败: {close_e}")
+                            print("⚖" * 30)
+                            continue  # 已撤单，跳过本轮深度检测
+
                 # 获取我的挂单量（用于从同档深度中排除自己）
                 order_size = t.get("order_size") or t.get("min_size", 500.0)
                 state.my_order_size = order_size
@@ -1394,6 +1466,25 @@ async def monitor_defense_loop(strategy_tokens: list):
                                 if token_info_replace["token_id"] not in existing_ids:
                                     pending_retry_tokens.append(token_info_replace)
                             print(f"   📋 已加入重试队列（{len(pending_retry_tokens)} 个待重试），将在下次重试周期重新挂单")
+
+                        # 💰 防御撤单后立即清仓检查
+                        try:
+                            def_positions = await asyncio.to_thread(poly_client.get_all_positions)
+                            if def_positions is not None:
+                                for _, pos_row in def_positions.iterrows():
+                                    if str(pos_row.get('asset', '')) == token_id:
+                                        pos_shares = float(pos_row.get('size', 0))
+                                        if pos_shares >= MIN_POSITION_TO_CLOSE:
+                                            close_book = all_books.get(token_id)
+                                            if close_book and close_book.bids:
+                                                close_bids = sorted(close_book.bids, key=lambda x: float(x.price), reverse=True)
+                                                close_best_bid = float(close_bids[0].price)
+                                                close_price = max(0.01, round(close_best_bid - CLOSE_PRICE_OFFSET, 2))
+                                                print(f"   💰 [紧急清仓] 发现持仓 {pos_shares:.1f} shares，立即清仓 @ ${close_price:.3f}")
+                                                await asyncio.to_thread(poly_client.create_order, token_id, "SELL", close_price, pos_shares, t.get("neg_risk", False))
+                                                break
+                        except Exception as close_e:
+                            print(f"   ⚠️ [紧急清仓] 失败: {close_e}")
                     else:
                         print("⚠️ 防御未开启，仅报警")
                     print("!" * 70)
