@@ -5,12 +5,13 @@ import requests
 import pandas as pd
 import numpy as np
 import traceback
+import concurrent.futures
 from datetime import datetime
 
 # 引入项目模块
 from data_updater.trading_utils import get_clob_client
 from data_updater.google_utils import get_spreadsheet
-from data_updater.find_markets import get_sel_df, get_all_markets, get_all_results, get_markets, add_volatility_to_df
+from data_updater.find_markets import get_sel_df, get_all_markets, get_all_results, get_markets, add_volatility_to_df, batch_fetch_volumes
 from gspread_dataframe import set_with_dataframe
 
 # 奖励快照文件路径（用于跨轮次对比）
@@ -293,16 +294,9 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
 # ================= Helper Functions =================
 
 def update_sheet(data, worksheet):
-    all_values = worksheet.get_all_values()
-    existing_num_rows = len(all_values)
-    existing_num_cols = len(all_values[0]) if all_values else 0
-    num_rows, num_cols = data.shape
-    max_rows = max(num_rows, existing_num_rows)
-    max_cols = max(num_cols, existing_num_cols)
-    padded_data = pd.DataFrame('', index=range(max_rows), columns=range(max_cols))
-    padded_data.iloc[:num_rows, :num_cols] = data.values
-    padded_data.columns = list(data.columns) + [''] * (max_cols - num_cols)
-    set_with_dataframe(worksheet, padded_data, include_index=False, include_column_header=True, resize=True)
+    """优化版：直接 clear + write，省去先读取旧数据再 padding 的开销"""
+    worksheet.clear()
+    set_with_dataframe(worksheet, data, include_index=False, include_column_header=True, resize=True)
 
 def clean_and_prepare_data(df):
     """
@@ -371,11 +365,28 @@ def fetch_and_process_data():
 
     all_results = get_all_results(rewarded_df, client)
     print("Got all Results")
+
+    # 🔥 批量获取 volume（替代逐个请求 Gamma API，节省 10-30 秒）
+    condition_ids = [r.get('condition_id', '') for r in all_results if r]
+    volumes_map = batch_fetch_volumes(condition_ids)
+    for r in all_results:
+        if r:
+            cid = r.get('condition_id', '')
+            r['volume'] = volumes_map.get(cid, 0.0)
+
     m_data, all_markets = get_markets(all_results, sel_df, maker_reward=0.75)
     print(f"Got all orderbook. Total markets: {len(all_markets)}")
 
-    # 2. 计算波动率（并发数从默认5提升到15，加速波动率获取）
-    new_df = add_volatility_to_df(all_markets, max_workers=15)
+    # 🔥 跳过无效市场（best_bid=0 且 best_ask=0 表示无订单簿，波动率无意义）
+    valid_markets = all_markets[
+        (all_markets['best_bid'] > 0) | (all_markets['best_ask'] > 0)
+    ].copy()
+    skipped = len(all_markets) - len(valid_markets)
+    if skipped > 0:
+        print(f"🔥 [性能优化] 跳过 {skipped} 个无订单簿市场的波动率计算")
+
+    # 2. 计算波动率（并发数提升到 25，加速波动率获取）
+    new_df = add_volatility_to_df(valid_markets, max_workers=25)
     
     # 3. 基础数据处理
     for col in ['24_hour', '7_day', '14_day']:
@@ -467,38 +478,42 @@ def fetch_and_process_data():
     print(f"  - Normal LP: {len(normal_lp_df)}")
     print(f"  - High Reward Aggressive: {len(aggressive_df)}")
 
-    # ================== 更新 Google Sheets ==================
+    # ================== 更新 Google Sheets（并行写入）==================
     if len(master_df) > 0:
         try:
-            print("Updating Sheets...")
-            # 1. 更新 Smart LP (总表)
-            update_sheet(smart_df, wk_smart)
-            print("-> Updated 'Smart LP Strategy'")
+            print("Updating Sheets (parallel)...")
             
-            # 2. 更新 Blue Ocean (新表)
-            update_sheet(blue_ocean_df, wk_blue)
-            print("-> Updated 'Blue Ocean Strategy'")
-            
-            # 3. 更新 Normal LP (新表)
-            update_sheet(normal_lp_df, wk_normal)
-            print("-> Updated 'Normal LP Strategy'")
-            
-            # 4. 更新 High Reward Aggressive (新表)
-            if not aggressive_df.empty:
-                update_sheet(aggressive_df, wk_aggressive)
-                print(f"-> Updated 'High Reward Aggressive' ({len(aggressive_df)} markets)")
+            # 准备 aggressive 数据
+            if aggressive_df.empty:
+                agg_data = pd.DataFrame([{'question': '当前无符合条件的高奖励市场'}])
             else:
-                # 无符合条件的市场时写入提示
-                empty_df = pd.DataFrame([{'question': '当前无符合条件的高奖励市场'}])
-                update_sheet(empty_df, wk_aggressive)
-                print("-> Updated 'High Reward Aggressive' (无符合条件市场)")
-            
-            # 5. 更新其他基础表 (全量更新时才做)
+                agg_data = aggressive_df
+
+            # 构建写入任务列表：(数据, worksheet, 名称)
+            sheet_tasks = [
+                (smart_df, wk_smart, 'Smart LP Strategy'),
+                (blue_ocean_df, wk_blue, 'Blue Ocean Strategy'),
+                (normal_lp_df, wk_normal, 'Normal LP Strategy'),
+                (agg_data, wk_aggressive, 'High Reward Aggressive'),
+            ]
+            # 全量更新时加入基础表
             if len(master_df) > 20:
-                update_sheet(master_df, wk_all)
-                print("-> Updated 'All Markets'")
-                update_sheet(m_data, wk_full)
-                print("-> Updated 'Full Markets'")
+                sheet_tasks.append((master_df, wk_all, 'All Markets'))
+                sheet_tasks.append((m_data, wk_full, 'Full Markets'))
+
+            # 🔥 并行写入 Google Sheets（从串行 6 次 → 并行，节省 5-15 秒）
+            def _update_one(task):
+                data, ws, name = task
+                try:
+                    update_sheet(data, ws)
+                    return f"-> Updated '{name}' ({len(data)} rows)"
+                except Exception as e:
+                    return f"⚠️ Failed '{name}': {e}"
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(sheet_tasks)) as executor:
+                futures = [executor.submit(_update_one, t) for t in sheet_tasks]
+                for future in concurrent.futures.as_completed(futures):
+                    print(future.result())
             
             print(f"[{pd.to_datetime('now')}] Update Cycle Completed Successfully.")
             

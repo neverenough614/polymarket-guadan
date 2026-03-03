@@ -205,23 +205,8 @@ def process_single_row(row, client):
     ret['end_date_iso'] = row.get('end_date_iso', '')
     ret['end_date'] = row.get('end_date_iso', '') 
     
-    # 成交量：从 Gamma API 获取 24h 成交量
-    vol = 0.0
-    if condition_id:
-        try:
-            r = session.get(
-                "https://gamma-api.polymarket.com/markets",
-                params={"condition_ids": condition_id, "limit": 1},
-                timeout=3
-            )
-            data = r.json()
-            markets = data if isinstance(data, list) else data.get("data", [])
-            if markets:
-                m = markets[0]
-                vol = float(m.get("volume24hr") or m.get("volumeNum") or m.get("volume") or 0)
-        except:
-            pass
-    ret['volume'] = vol
+    # volume 由 batch_fetch_volumes() 批量填充，此处不再逐个请求
+    ret['volume'] = 0.0
 
     ret['market_slug'] = row.get('market_slug', '')
     ret['token1'] = token1
@@ -229,6 +214,48 @@ def process_single_row(row, client):
     ret['condition_id'] = condition_id
 
     return ret
+
+def batch_fetch_volumes(condition_ids, batch_size=50):
+    """批量获取 24h 成交量，避免逐个请求 Gamma API。
+    将 N 次请求压缩为 N/batch_size 次，大幅减少网络延迟。"""
+    volumes = {}
+    if not condition_ids:
+        return volumes
+
+    # 去重
+    unique_ids = list(set(cid for cid in condition_ids if cid))
+    print(f"📊 [批量 Volume] 正在获取 {len(unique_ids)} 个市场的成交量（每批 {batch_size} 个）...")
+
+    def _fetch_batch(batch):
+        batch_vols = {}
+        try:
+            ids_str = ",".join(batch)
+            r = session.get(
+                "https://gamma-api.polymarket.com/markets",
+                params={"condition_ids": ids_str, "limit": len(batch)},
+                timeout=10
+            )
+            data = r.json()
+            markets_list = data if isinstance(data, list) else data.get("data", [])
+            for m in markets_list:
+                cid = str(m.get("conditionId") or m.get("condition_id", "")).strip()
+                vol = float(m.get("volume24hr") or m.get("volumeNum") or m.get("volume") or 0)
+                if cid:
+                    batch_vols[cid] = vol
+        except Exception as e:
+            print(f"   ⚠️ 批量 Volume 请求失败: {e}")
+        return batch_vols
+
+    # 并发请求各批次
+    batches = [unique_ids[i:i+batch_size] for i in range(0, len(unique_ids), batch_size)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(batches))) as executor:
+        futures = [executor.submit(_fetch_batch, batch) for batch in batches]
+        for future in concurrent.futures.as_completed(futures):
+            volumes.update(future.result())
+
+    print(f"   ✅ 获取到 {len(volumes)} 个市场的成交量")
+    return volumes
+
 
 def get_all_results(all_df, client, max_workers=40):
     all_results = []

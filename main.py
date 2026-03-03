@@ -1369,20 +1369,26 @@ async def monitor_defense_loop(strategy_tokens: list):
                         state.first_run = True
                         state.reset_high_water()
 
-                        # 🔄 撤单后等待市场稳定，再尝试重新挂单
-                        await asyncio.sleep(60)
+                        # 🔄 非阻塞：spawn 独立任务处理等待+重挂，主循环立即继续监控其他 token
                         token_info_replace = next((t for t in current_tokens if t["token_id"] == token_id), None)
                         if token_info_replace:
-                            print(f"🔄 [防御后重挂] 正在重新检验挂单条件: {state.question[:40]}...")
-                            replace_result = await asyncio.to_thread(place_order_for_token, poly_client, token_info_replace)
-                            buy_ok  = replace_result.get("buy_status")  == "placed"
-                            sell_ok = replace_result.get("sell_status") == "placed"
-                            if buy_ok or sell_ok:
-                                buy_info  = f"买{replace_result['buy_tier']}(${replace_result['buy_price']:.3f})"  if buy_ok  else "买单跳过"
-                                sell_info = f"卖{replace_result['sell_tier']}(${replace_result['sell_price']:.3f})" if sell_ok else "卖单跳过"
-                                print(f"✅ [防御后重挂] 重新挂单成功: {buy_info} | {sell_info}")
-                            else:
-                                print(f"⚠️ [防御后重挂] 条件不满足，暂不挂单（{replace_result.get('error', '深度不足')}）")
+                            async def _delayed_replace(client_ref, token_info, question):
+                                try:
+                                    print(f"   ⏳ 60s 后尝试重挂: {question[:40]}...")
+                                    await asyncio.sleep(60)
+                                    print(f"🔄 [防御后重挂] 正在重新检验挂单条件: {question[:40]}...")
+                                    replace_result = await asyncio.to_thread(place_order_for_token, client_ref, token_info)
+                                    buy_ok  = replace_result.get("buy_status")  == "placed"
+                                    sell_ok = replace_result.get("sell_status") == "placed"
+                                    if buy_ok or sell_ok:
+                                        buy_info  = f"买{replace_result['buy_tier']}(${replace_result['buy_price']:.3f})"  if buy_ok  else "买单跳过"
+                                        sell_info = f"卖{replace_result['sell_tier']}(${replace_result['sell_price']:.3f})" if sell_ok else "卖单跳过"
+                                        print(f"✅ [防御后重挂] 重新挂单成功: {buy_info} | {sell_info}")
+                                    else:
+                                        print(f"⚠️ [防御后重挂] 条件不满足，暂不挂单（{replace_result.get('error', '深度不足')}）")
+                                except Exception as e:
+                                    print(f"⚠️ [防御后重挂] 异常: {e}")
+                            asyncio.create_task(_delayed_replace(poly_client, token_info_replace, state.question))
                     else:
                         print("⚠️ 防御未开启，仅报警")
                     print("!" * 70)
