@@ -34,6 +34,14 @@ QUESTION_BLACKLIST_KEYWORDS = [
     # 政治演讲单日事件
      "State of the Union", 'say "', "tweets", "tweet",
 ]
+
+# 硬黑名单：命中关键词的市场完全不挂单（大小写不敏感）
+# 与上面的 QUESTION_BLACKLIST_KEYWORDS（跳过第一档）不同，这里是彻底屏蔽
+QUESTION_HARD_BLACKLIST = [
+    # 在这里添加你想完全屏蔽的关键词，每个一行，例如：
+    "Iran","Iranian","Israel","Oil",
+]
+
 DEPTH_THRESHOLD_TIER1   = 1500.0   # 第1档深度阈值（USDC），提高门槛确保只有深厚市场才挂第一档
 DEPTH_THRESHOLD_TIER2   = 200.0    # 第2、3档深度阈值（USDC）
 EXTREME_PRICE_THRESHOLD = 0.10     # 极端价格阈值（<0.10 或 >0.90 必须双向挂单）
@@ -235,8 +243,17 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
         if not question or question.lower() in ('', 'nan', 'none'):
             continue
 
-        # 关键词黑名单过滤（大小写不敏感）→ 不跳过，标记为跳过第一档
+        # 🚫 硬黑名单：完全不挂单
         question_lower = question.lower()
+        hard_matched = next(
+            (kw for kw in QUESTION_HARD_BLACKLIST if kw.lower() in question_lower),
+            None
+        )
+        if hard_matched:
+            print(f"   🚫 [硬黑名单] 跳过: {question[:55]}... (命中: '{hard_matched}') → 完全不挂单")
+            continue
+
+        # 关键词黑名单过滤（大小写不敏感）→ 不跳过，标记为跳过第一档
         matched_kw = next(
             (kw for kw in QUESTION_BLACKLIST_KEYWORDS if kw.lower() in question_lower),
             None
@@ -1369,26 +1386,14 @@ async def monitor_defense_loop(strategy_tokens: list):
                         state.first_run = True
                         state.reset_high_water()
 
-                        # 🔄 非阻塞：spawn 独立任务处理等待+重挂，主循环立即继续监控其他 token
+                        # 🔄 加入重试队列，由 periodic_retry_task 统一处理重挂
                         token_info_replace = next((t for t in current_tokens if t["token_id"] == token_id), None)
                         if token_info_replace:
-                            async def _delayed_replace(client_ref, token_info, question):
-                                try:
-                                    print(f"   ⏳ 60s 后尝试重挂: {question[:40]}...")
-                                    await asyncio.sleep(60)
-                                    print(f"🔄 [防御后重挂] 正在重新检验挂单条件: {question[:40]}...")
-                                    replace_result = await asyncio.to_thread(place_order_for_token, client_ref, token_info)
-                                    buy_ok  = replace_result.get("buy_status")  == "placed"
-                                    sell_ok = replace_result.get("sell_status") == "placed"
-                                    if buy_ok or sell_ok:
-                                        buy_info  = f"买{replace_result['buy_tier']}(${replace_result['buy_price']:.3f})"  if buy_ok  else "买单跳过"
-                                        sell_info = f"卖{replace_result['sell_tier']}(${replace_result['sell_price']:.3f})" if sell_ok else "卖单跳过"
-                                        print(f"✅ [防御后重挂] 重新挂单成功: {buy_info} | {sell_info}")
-                                    else:
-                                        print(f"⚠️ [防御后重挂] 条件不满足，暂不挂单（{replace_result.get('error', '深度不足')}）")
-                                except Exception as e:
-                                    print(f"⚠️ [防御后重挂] 异常: {e}")
-                            asyncio.create_task(_delayed_replace(poly_client, token_info_replace, state.question))
+                            with pending_retry_lock:
+                                existing_ids = {t["token_id"] for t in pending_retry_tokens}
+                                if token_info_replace["token_id"] not in existing_ids:
+                                    pending_retry_tokens.append(token_info_replace)
+                            print(f"   📋 已加入重试队列（{len(pending_retry_tokens)} 个待重试），将在下次重试周期重新挂单")
                     else:
                         print("⚠️ 防御未开启，仅报警")
                     print("!" * 70)
