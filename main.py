@@ -30,7 +30,7 @@ QUESTION_BLACKLIST_KEYWORDS = [
     # 军事打击类
      "strikes", "strike", "attack", "attacks", "bomb", "missile", "nuclear strike",
     #地缘政治占领/封锁类
-     "capture", "invade", "invasion", "Strait of Hormuz","Iran","aliens","Iranian",
+     "capture", "invade", "invasion", "Strait of Hormuz","aliens",
     # 政治演讲单日事件
      "State of the Union", 'say "', "tweets", "tweet",
 ]
