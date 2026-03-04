@@ -1,0 +1,20 @@
+[package]
+name = "poly-maker-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Polymarket 交互的 Rust 版本（简化版，不含 Google 表格）"
+
+[dependencies]
+polymarket-client-sdk = { version = "0.4", features = ["clob", "data"] }
+alloy = { version = "1.7", features = ["signer-local", "signers"] }
+anyhow = "1.0"
+tokio = { version = "1", features = ["full"] }
+dotenvy = "0.15"
+rust_decimal = { version = "1", features = ["serde"] }
+rust_decimal_macros = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = "0.4"
+axum = { version = "0.7", features = ["json"] }
+tower-http = { version = "0.5", features = ["cors"] }
+futures = "0.3"

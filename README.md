@@ -123,6 +123,20 @@ uv run python update_markets.py
 
 This should run continuously in the background (preferably on a different IP than your trading bot).
 
+**Rust 版用户**：`update_markets.py` 每次运行完成后会自动将策略导出到 `poly_maker_rs/strategy_tokens.json`，可直接用 `cargo run -- serve` 启动 Rust 版。
+
+#### 代理（VPN/Clash 等）
+
+若需通过代理访问 Polymarket API，设置环境变量：
+
+```bash
+export HTTP_PROXY=http://127.0.0.1:7890
+export HTTPS_PROXY=http://127.0.0.1:7890
+# Windows PowerShell:
+# $env:HTTP_PROXY = "http://127.0.0.1:7890"
+# $env:HTTPS_PROXY = "http://127.0.0.1:7890"
+```
+
 - Add markets you want to trade to the "Selected Markets" sheet
 - Select markets from the "Volatility Markets" sheet
 - Configure parameters in the "Hyperparameters" sheet (default parameters that worked well in November are included)

@@ -1,0 +1,12 @@
+[
+  {
+    "token_id": "15871154585880608648532107628464183779895785213830018178010423617714102767076",
+    "token_type": "YES",
+    "question": "Will X happen?",
+    "min_size": 100,
+    "neg_risk": false,
+    "max_spread": 0.03,
+    "volatility_sum": 0,
+    "source": "Normal LP"
+  }
+]
