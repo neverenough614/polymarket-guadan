@@ -23,6 +23,7 @@ import poly_data.global_state as global_state
 # ======================================================
 STRATEGY_SHEET_NAME      = "Normal LP Strategy"
 AGGRESSIVE_SHEET_NAME    = "High Reward Aggressive"  # 高奖励激进策略（刀口舔血）
+CHAIN_REWARDS_SHEET_NAME = "Chain Rewards Alert"      # 链上奖励自动发现
 
 # 关键词黑名单（大小写不敏感，命中则跳过该市场）
 # 主要过滤：军事打击类、政治演讲单日事件、地缘政治占领/封锁类
@@ -56,6 +57,9 @@ NORMAL_MAX_ORDER_SIZE   = 800.0    # Normal LP 最大 700 shares
 # High Reward：激进策略，占比小、挂单量低
 AGGRESSIVE_SIZE_RATIO   = 0.08     # High Reward 占前三档总深度 8%
 AGGRESSIVE_MAX_ORDER_SIZE = 300.0  # High Reward 最大 300 shares
+# Chain Rewards：链上自动发现的高奖励市场
+CHAIN_REWARDS_SIZE_RATIO     = 0.10     # Chain Rewards 占前三档总深度 10%
+CHAIN_REWARDS_MAX_ORDER_SIZE = 500.0    # Chain Rewards 最大 500 shares
 # 兼容旧代码的默认值
 DYNAMIC_SIZE_RATIO      = 0.10     # 默认（手动挂单等）
 MAX_ORDER_SIZE          = 500.0    # 默认上限
@@ -385,10 +389,28 @@ def load_strategy_markets() -> List[Dict]:
         except Exception as e:
             print(f"   ⚠️ 读取 '{AGGRESSIVE_SHEET_NAME}' 失败（可能尚未创建）: {e}")
 
+        # ── 3. Chain Rewards Alert（链上自动发现的高奖励市场）──────
+        print(f"   📋 读取 '{CHAIN_REWARDS_SHEET_NAME}' ...")
+        try:
+            wk3 = sh.worksheet(CHAIN_REWARDS_SHEET_NAME)
+            df3 = pd.DataFrame(wk3.get_all_records())
+            if not df3.empty:
+                # 列名适配：max_spread_c → max_spread（让 _parse_sheet_tokens 能识别）
+                if 'max_spread_c' in df3.columns and 'max_spread' not in df3.columns:
+                    df3 = df3.rename(columns={'max_spread_c': 'max_spread'})
+                n3 = _parse_sheet_tokens(df3, "Chain Rewards", tokens, seen_token_ids,
+                                          max_spread_unit_cents=True)
+                print(f"   ✅ '{CHAIN_REWARDS_SHEET_NAME}': {len(df3)} 行 → {n3} 个新 token")
+            else:
+                print(f"   ⚠️ '{CHAIN_REWARDS_SHEET_NAME}' 表格为空")
+        except Exception as e:
+            print(f"   ⚠️ 读取 '{CHAIN_REWARDS_SHEET_NAME}' 失败（可能尚未创建）: {e}")
+
         # 统计各策略来源
         normal_count = sum(1 for t in tokens if t.get("source") == "Normal LP")
         aggressive_count = sum(1 for t in tokens if t.get("source") == "High Reward")
-        print(f"   ✅ 合并后共 {len(tokens)} 个 token（Normal LP: {normal_count}, High Reward: {aggressive_count}）")
+        chain_count = sum(1 for t in tokens if t.get("source") == "Chain Rewards")
+        print(f"   ✅ 合并后共 {len(tokens)} 个 token（Normal LP: {normal_count}, High Reward: {aggressive_count}, Chain Rewards: {chain_count}）")
         print(f"{'='*60}\n")
         return tokens
 
@@ -617,6 +639,8 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
             sr, mos = AGGRESSIVE_SIZE_RATIO, AGGRESSIVE_MAX_ORDER_SIZE
         elif source == "Normal LP":
             sr, mos = NORMAL_SIZE_RATIO, NORMAL_MAX_ORDER_SIZE
+        elif source == "Chain Rewards":
+            sr, mos = CHAIN_REWARDS_SIZE_RATIO, CHAIN_REWARDS_MAX_ORDER_SIZE
         else:
             sr, mos = DYNAMIC_SIZE_RATIO, MAX_ORDER_SIZE
         order_size = calculate_dynamic_size(book, mid, base_min_size, volatility_sum=vol_sum,
@@ -1012,7 +1036,15 @@ async def auto_close_positions_task(strategy_tokens: list):
                             "shares":     size,
                             "neg_risk":   t.get("neg_risk", False),
                         })
-                    # else: 不在策略列表中的持仓 → 跳过，不清仓（可能是手动买入的）
+                    else:
+                        # 手动挂单产生的持仓：也清仓
+                        positions_found.append({
+                            "token_id":   asset,
+                            "token_type": "MANUAL",
+                            "question":   f"手动挂单 ({asset[:10]}...)",
+                            "shares":     size,
+                            "neg_risk":   False,
+                        })
 
             if not positions_found:
                 continue

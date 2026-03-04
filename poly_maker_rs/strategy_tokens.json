@@ -1,42 +1,22 @@
 [
   {
-    "token_id": "35162435508550569894885907104732453786428446460311835767844898641437367939974",
+    "token_id": "69535608305491420566643091313992070411301780650198254308517668304539065617502",
     "token_type": "YES",
-    "question": "Will OpenAI release a social network in 2026?",
+    "question": "Will NVIDIA reach $200 in March?",
     "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 1.55,
+    "max_spread": 0.055,
+    "volatility_sum": 51.12,
     "source": "Normal LP"
   },
   {
-    "token_id": "39183639490729729447786174907561327518754458647964682163615911835515028800863",
+    "token_id": "79820751130619368678527241862752703133765385712736343453350582284121390561224",
     "token_type": "NO",
-    "question": "Will OpenAI release a social network in 2026?",
+    "question": "Will NVIDIA reach $200 in March?",
     "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 1.55,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "9583494188423490312218098813832257053531340912570990006682240728656999954106",
-    "token_type": "YES",
-    "question": "Will MrBeast's next video get between 70 and 80 million views on week 1?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 50.980000000000004,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "106274115944692664025867811309935244217335188315197973901132441063767578885113",
-    "token_type": "NO",
-    "question": "Will MrBeast's next video get between 70 and 80 million views on week 1?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 50.980000000000004,
+    "max_spread": 0.055,
+    "volatility_sum": 51.12,
     "source": "Normal LP"
   },
   {
@@ -46,7 +26,7 @@
     "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.035,
-    "volatility_sum": 17.84,
+    "volatility_sum": 17.96,
     "source": "Normal LP"
   },
   {
@@ -56,27 +36,47 @@
     "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.035,
-    "volatility_sum": 17.84,
+    "volatility_sum": 17.96,
     "source": "Normal LP"
   },
   {
-    "token_id": "72330053416218497902586148448529312225780457899615417910269810465271730575528",
+    "token_id": "9583494188423490312218098813832257053531340912570990006682240728656999954106",
     "token_type": "YES",
-    "question": "Will Noam Chomsky be confirmed to have visited Epstein’s island?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 9.28,
+    "question": "Will MrBeast's next video get between 70 and 80 million views on week 1?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 41.98,
     "source": "Normal LP"
   },
   {
-    "token_id": "63390624888596427726494616716418700539778239188403105682463927133916437925426",
+    "token_id": "106274115944692664025867811309935244217335188315197973901132441063767578885113",
     "token_type": "NO",
-    "question": "Will Noam Chomsky be confirmed to have visited Epstein’s island?",
-    "min_size": 20.0,
+    "question": "Will MrBeast's next video get between 70 and 80 million views on week 1?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 41.98,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "2702338441466878657029392611195273628071044970702339052495737338673211402749",
+    "token_type": "YES",
+    "question": "Will Samuel Alito announce his retirement by December 31, 2026?",
+    "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 9.28,
+    "max_spread": 0.045,
+    "volatility_sum": 10.26,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "70201851876332354439276604090702674974859631903486990974685797729205226013576",
+    "token_type": "NO",
+    "question": "Will Samuel Alito announce his retirement by December 31, 2026?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 10.26,
     "source": "Normal LP"
   },
   {
@@ -100,33 +100,13 @@
     "source": "Normal LP"
   },
   {
-    "token_id": "80729497556167859873506230548301005910400753761026044987382993994882209455833",
-    "token_type": "YES",
-    "question": "Will Burlington Stores (BURL) beat quarterly earnings?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 7.529999999999999,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "32976918924918415422936637170301855234769848309122907885973085908489831679323",
-    "token_type": "NO",
-    "question": "Will Burlington Stores (BURL) beat quarterly earnings?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 7.529999999999999,
-    "source": "Normal LP"
-  },
-  {
     "token_id": "17197784686054268636207459407305435105088445407635989680493756917312451753697",
     "token_type": "YES",
     "question": "Don Lemon charges dropped?",
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 6.54,
+    "volatility_sum": 5.78,
     "source": "Normal LP"
   },
   {
@@ -136,307 +116,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 6.54,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "39613364913865315931514386378018944414998874795564653895884416470707478023814",
-    "token_type": "YES",
-    "question": "Miguel Díaz-Canel out as leader of Cuba by June 30?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 36.17,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "58505293773838465935116525784998147381307821161678906360166240694093964623719",
-    "token_type": "NO",
-    "question": "Miguel Díaz-Canel out as leader of Cuba by June 30?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 36.17,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "112288566808772191752176657553224517134449016925515982914334631049531197841047",
-    "token_type": "YES",
-    "question": "US strike on Mexico by December 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 16.939999999999998,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "4920174600328060381478178332126683115937537315909025772685332706706025236975",
-    "token_type": "NO",
-    "question": "US strike on Mexico by December 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 16.939999999999998,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "107794306769227462527572657760667219301510029775946904556315468051192052417002",
-    "token_type": "YES",
-    "question": "Naim Qassem out as Hezbollah’s secretary-general by March 31, 2026?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 75.62,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "21614879912002204029482010964113433162538694333938229605880620451256591931202",
-    "token_type": "NO",
-    "question": "Naim Qassem out as Hezbollah’s secretary-general by March 31, 2026?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 75.62,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "2702338441466878657029392611195273628071044970702339052495737338673211402749",
-    "token_type": "YES",
-    "question": "Will Samuel Alito announce his retirement by December 31, 2026?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 10.559999999999999,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "70201851876332354439276604090702674974859631903486990974685797729205226013576",
-    "token_type": "NO",
-    "question": "Will Samuel Alito announce his retirement by December 31, 2026?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 10.559999999999999,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "99624346890619002372699754069143706837879948305658347182463693771839092913168",
-    "token_type": "YES",
-    "question": "Will Gold (GC) hit (HIGH) $6,000 by end of June?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 21.48,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "101707900997054342797855573572050875506609273088208523799017750787628556794618",
-    "token_type": "NO",
-    "question": "Will Gold (GC) hit (HIGH) $6,000 by end of June?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 21.48,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "23072428889948871919916997912866343746006774483855187447858489211364943872755",
-    "token_type": "YES",
-    "question": "Iran x Israel/US conflict ends by June 30?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 40.28,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "103799449565939648641249283675043265448904133572321099361316887955408449940585",
-    "token_type": "NO",
-    "question": "Iran x Israel/US conflict ends by June 30?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 40.28,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "6761884778816083542753350539779617201084594664234729655783875952381923983097",
-    "token_type": "YES",
-    "question": "Will Magdalena Andersson be the next Prime Minister of Sweden?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 13.8,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "49952287244614575734723913757649087902024339238007187585607375183859292977482",
-    "token_type": "NO",
-    "question": "Will Magdalena Andersson be the next Prime Minister of Sweden?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 13.8,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "38150236160446829072501753393850227806340699637109872560673959670816990513883",
-    "token_type": "YES",
-    "question": "Will Marvell Technology (MRVL) beat quarterly earnings?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 10.0,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "84914194855393311645093760913860077572380799437067773776381593547566584674084",
-    "token_type": "NO",
-    "question": "Will Marvell Technology (MRVL) beat quarterly earnings?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 10.0,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "26400080914353717825164535172852152218307205367782177320628813153770947661147",
-    "token_type": "YES",
-    "question": "Will the Fed’s lower bound reach 3.0% or lower before 2027?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 9.77,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "106108748173868274585572933158072703700594263582753101658047439839580454049190",
-    "token_type": "NO",
-    "question": "Will the Fed’s lower bound reach 3.0% or lower before 2027?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 9.77,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "38487155026041533062980821872238023790862908049855818921747904019478875496931",
-    "token_type": "YES",
-    "question": "Billionaire one-time wealth tax passes in California election 2026?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 20.509999999999998,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "7330556727383706468662351173040823924339817877848787483691015397124505109410",
-    "token_type": "NO",
-    "question": "Billionaire one-time wealth tax passes in California election 2026?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 20.509999999999998,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "80463373991622036686340838552460073469934033461139674829253801164332726542662",
-    "token_type": "YES",
-    "question": "Will the Bank of Russia decrease the key rate after the March Meeting?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 9.45,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "40404652775093526785429410260244958420761845146462815202669747359786231959545",
-    "token_type": "NO",
-    "question": "Will the Bank of Russia decrease the key rate after the March Meeting?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 9.45,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "68671366615449911083206544634122659980182050807847635039820242738577392906636",
-    "token_type": "YES",
-    "question": "US/Israel strike on Fordow nuclear facility by March 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 46.24,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "15383684067596502149123204844216805492228844396215325931845777976929865529565",
-    "token_type": "NO",
-    "question": "US/Israel strike on Fordow nuclear facility by March 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 46.24,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "29765742191817129447644931228351252525093921166235658978788622749969406719586",
-    "token_type": "YES",
-    "question": "Maduro guilty of all counts?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 9.52,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "103419345332559096233303724453024466406185416315397181311559011677720094331804",
-    "token_type": "NO",
-    "question": "Maduro guilty of all counts?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 9.52,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "40688752571367984562094189705956819976283796447723243231995074339008425670892",
-    "token_type": "YES",
-    "question": "U.S. anti-cartel ground operation in Mexico by March 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 58.09,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "68800440485479513724438013945607151077670501783955021074751998388722951568905",
-    "token_type": "NO",
-    "question": "U.S. anti-cartel ground operation in Mexico by March 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 58.09,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "101856306106619561547484060337828195810676190048477336006217084007311032600729",
-    "token_type": "YES",
-    "question": "Will Nicolás Maduro be sentenced to at least 60 years in prison?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 12.48,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "34186620714496477289989614919872575384612335995265512849332133604508582533562",
-    "token_type": "NO",
-    "question": "Will Nicolás Maduro be sentenced to at least 60 years in prison?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 12.48,
+    "volatility_sum": 5.78,
     "source": "Normal LP"
   },
   {
@@ -446,7 +126,7 @@
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.055,
-    "volatility_sum": 72.84,
+    "volatility_sum": 65.60000000000001,
     "source": "Normal LP"
   },
   {
@@ -456,27 +136,187 @@
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.055,
-    "volatility_sum": 72.84,
+    "volatility_sum": 65.60000000000001,
     "source": "Normal LP"
   },
   {
-    "token_id": "54066963382974859240347310461020134785981724636635890298517360968400982528991",
+    "token_id": "11494223831281623128934546126496808151497135339202866487133963712110177728272",
     "token_type": "YES",
-    "question": "Will Angela Rayner be the next Prime Minister of the United Kingdom in 2026?",
-    "min_size": 200.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 15.62,
+    "question": "Will there be at least 5000 measles cases in the U.S. in 2026?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 5.71,
     "source": "Normal LP"
   },
   {
-    "token_id": "341760906399923559682824982870791179504347648524865319277821837070071218382",
+    "token_id": "25159531167144327936275979213685382434426898668589526457616467971003163711582",
     "token_type": "NO",
-    "question": "Will Angela Rayner be the next Prime Minister of the United Kingdom in 2026?",
-    "min_size": 200.0,
-    "neg_risk": true,
+    "question": "Will there be at least 5000 measles cases in the U.S. in 2026?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 5.71,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "72330053416218497902586148448529312225780457899615417910269810465271730575528",
+    "token_type": "YES",
+    "question": "Will Noam Chomsky be confirmed to have visited Epstein’s island?",
+    "min_size": 20.0,
+    "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 15.62,
+    "volatility_sum": 9.28,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "63390624888596427726494616716418700539778239188403105682463927133916437925426",
+    "token_type": "NO",
+    "question": "Will Noam Chomsky be confirmed to have visited Epstein’s island?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 9.28,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "112288566808772191752176657553224517134449016925515982914334631049531197841047",
+    "token_type": "YES",
+    "question": "US strike on Mexico by December 31?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 16.86,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "4920174600328060381478178332126683115937537315909025772685332706706025236975",
+    "token_type": "NO",
+    "question": "US strike on Mexico by December 31?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 16.86,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "112937628087331697317065233168528083229287804207100901534711974468554098083004",
+    "token_type": "YES",
+    "question": "Iran x Israel/US conflict ends by March 31?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 49.67999999999999,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "60020156117014074723286818065417148342963800223162713452237763775488251828713",
+    "token_type": "NO",
+    "question": "Iran x Israel/US conflict ends by March 31?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 49.67999999999999,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "6761884778816083542753350539779617201084594664234729655783875952381923983097",
+    "token_type": "YES",
+    "question": "Will Magdalena Andersson be the next Prime Minister of Sweden?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 13.760000000000002,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "49952287244614575734723913757649087902024339238007187585607375183859292977482",
+    "token_type": "NO",
+    "question": "Will Magdalena Andersson be the next Prime Minister of Sweden?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 13.760000000000002,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "25017394710017120555302464384960495790116005917584309111400898090693679741368",
+    "token_type": "YES",
+    "question": "Will USD reach 1.7M Iranian rials by March 31?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 35.07,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "17318467548218611877274190130825039937040165325753039146964511152794673319228",
+    "token_type": "NO",
+    "question": "Will USD reach 1.7M Iranian rials by March 31?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 35.07,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "107794306769227462527572657760667219301510029775946904556315468051192052417002",
+    "token_type": "YES",
+    "question": "Naim Qassem out as Hezbollah’s secretary-general by March 31, 2026?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 74.65,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "21614879912002204029482010964113433162538694333938229605880620451256591931202",
+    "token_type": "NO",
+    "question": "Naim Qassem out as Hezbollah’s secretary-general by March 31, 2026?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 74.65,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "26400080914353717825164535172852152218307205367782177320628813153770947661147",
+    "token_type": "YES",
+    "question": "Will the Fed’s lower bound reach 3.0% or lower before 2027?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 10.05,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "106108748173868274585572933158072703700594263582753101658047439839580454049190",
+    "token_type": "NO",
+    "question": "Will the Fed’s lower bound reach 3.0% or lower before 2027?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 10.05,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "61133563591077718117951551574393972269539212259637712158269247442827523364291",
+    "token_type": "YES",
+    "question": "Will Macy's (M) beat quarterly earnings?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 12.170000000000002,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "20431140167808837050540741767586112457194509048461233950802196035638962156580",
+    "token_type": "NO",
+    "question": "Will Macy's (M) beat quarterly earnings?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 12.170000000000002,
     "source": "Normal LP"
   },
   {
@@ -486,7 +326,7 @@
     "min_size": 20.0,
     "neg_risk": true,
     "max_spread": 0.035,
-    "volatility_sum": 11.12,
+    "volatility_sum": 11.079999999999998,
     "source": "Normal LP"
   },
   {
@@ -496,27 +336,147 @@
     "min_size": 20.0,
     "neg_risk": true,
     "max_spread": 0.035,
-    "volatility_sum": 11.12,
+    "volatility_sum": 11.079999999999998,
     "source": "Normal LP"
   },
   {
-    "token_id": "72520696330536076360077946681862561628420801967580803171010889009730758559066",
+    "token_id": "5860793179975302373487847179659631523604159676003608811307007800054310354473",
     "token_type": "YES",
-    "question": "Will the Court Force Trump to Refund Tariffs?",
-    "min_size": 200.0,
+    "question": "Will NVIDIA dip to $152 in March?",
+    "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 31.54,
+    "max_spread": 0.055,
+    "volatility_sum": 80.03,
     "source": "Normal LP"
   },
   {
-    "token_id": "12522399465485053436854565134102940007271969526119674646143207634472973813769",
+    "token_id": "90551731676504885028181324233753776768623582150209498796107341853257928698926",
     "token_type": "NO",
-    "question": "Will the Court Force Trump to Refund Tariffs?",
+    "question": "Will NVIDIA dip to $152 in March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 80.03,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "29765742191817129447644931228351252525093921166235658978788622749969406719586",
+    "token_type": "YES",
+    "question": "Maduro guilty of all counts?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 9.42,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "103419345332559096233303724453024466406185416315397181311559011677720094331804",
+    "token_type": "NO",
+    "question": "Maduro guilty of all counts?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 9.42,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "38487155026041533062980821872238023790862908049855818921747904019478875496931",
+    "token_type": "YES",
+    "question": "Billionaire one-time wealth tax passes in California election 2026?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 20.310000000000002,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "7330556727383706468662351173040823924339817877848787483691015397124505109410",
+    "token_type": "NO",
+    "question": "Billionaire one-time wealth tax passes in California election 2026?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 20.310000000000002,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "28222617226323017801509936473928384012233445238470848574562142788252025720083",
+    "token_type": "YES",
+    "question": "Will Russia capture all of Rodynske by March 31?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 29.31,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "96133656106740574277446214020777398233402435827467200775938917873268339749851",
+    "token_type": "NO",
+    "question": "Will Russia capture all of Rodynske by March 31?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 29.31,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "99624346890619002372699754069143706837879948305658347182463693771839092913168",
+    "token_type": "YES",
+    "question": "Will Gold (GC) hit (HIGH) $6,000 by end of June?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 31.54,
+    "volatility_sum": 21.439999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "101707900997054342797855573572050875506609273088208523799017750787628556794618",
+    "token_type": "NO",
+    "question": "Will Gold (GC) hit (HIGH) $6,000 by end of June?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 21.439999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "90219633094220474470577130009121928413533176784213993526332826440644404648253",
+    "token_type": "YES",
+    "question": "Will Tesla dip to $353 in March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 73.97,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "10072335008251953711290828562746216588304630868345049412424011923713358049272",
+    "token_type": "NO",
+    "question": "Will Tesla dip to $353 in March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 73.97,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "80822496881187464044904323930735374814391442763100022480297070361136099568761",
+    "token_type": "YES",
+    "question": "SpaceX IPO closing market cap above $1.8T?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 23.71,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "30427687464154883708138843011596245466741607842619929142307799202727981279551",
+    "token_type": "NO",
+    "question": "SpaceX IPO closing market cap above $1.8T?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 23.71,
     "source": "Normal LP"
   },
   {
@@ -540,53 +500,13 @@
     "source": "Normal LP"
   },
   {
-    "token_id": "31520369979138544760010902223025002843378100546010259446571643231338862366184",
-    "token_type": "YES",
-    "question": "Kevin Warsh confirmed as Fed Chair by May 15?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 10.44,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "39601666783449940814931879028937430223354491091963721085082577598497319736011",
-    "token_type": "NO",
-    "question": "Kevin Warsh confirmed as Fed Chair by May 15?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 10.44,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "28222617226323017801509936473928384012233445238470848574562142788252025720083",
-    "token_type": "YES",
-    "question": "Will Russia capture all of Rodynske by March 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 30.16,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "96133656106740574277446214020777398233402435827467200775938917873268339749851",
-    "token_type": "NO",
-    "question": "Will Russia capture all of Rodynske by March 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 30.16,
-    "source": "Normal LP"
-  },
-  {
     "token_id": "65396033350506725313266693161572493847482432654933099338943748693899562511370",
     "token_type": "YES",
     "question": "Will Dusty Johnson win the 2026 South Dakota Governor Republican primary election?",
     "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 22.15,
+    "volatility_sum": 21.87,
     "source": "Normal LP"
   },
   {
@@ -596,27 +516,7 @@
     "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 22.15,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "2011448762453318924331890857436552502625185273746051467874416268100776921808",
-    "token_type": "YES",
-    "question": "OpenAI IPO closing market cap above $1T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 10.57,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "37374318395281167819702754225484522381204606804163579477698382571172669062027",
-    "token_type": "NO",
-    "question": "OpenAI IPO closing market cap above $1T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 10.57,
+    "volatility_sum": 21.87,
     "source": "Normal LP"
   },
   {
@@ -626,7 +526,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 12.2,
+    "volatility_sum": 12.21,
     "source": "Normal LP"
   },
   {
@@ -636,127 +536,27 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 12.2,
+    "volatility_sum": 12.21,
     "source": "Normal LP"
   },
   {
-    "token_id": "91598277451888833943457869299081344513189737907823485218592748863763321112699",
+    "token_id": "72520696330536076360077946681862561628420801967580803171010889009730758559066",
     "token_type": "YES",
-    "question": "Will Russia capture Kostyantynivka by April 30?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 27.490000000000002,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "53831658761992660262271167425488866803302305236549476786294052519241195037228",
-    "token_type": "NO",
-    "question": "Will Russia capture Kostyantynivka by April 30?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 27.490000000000002,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "108404583612412017900991614858319938451930820299691195982097842688880737648604",
-    "token_type": "YES",
-    "question": "Trump announces end of military operations against Iran by March 31st?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 36.6,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "34435661373185108947701533193158508381976569118430837490472138190364158331702",
-    "token_type": "NO",
-    "question": "Trump announces end of military operations against Iran by March 31st?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 36.6,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "56615676606297588259337956203332341775475048285080710344367729433788967812170",
-    "token_type": "YES",
-    "question": "Will OpenAI not IPO by December 31, 2026?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 15.92,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "8070607953656787024050950499598687532281829563384949938603247089607814583142",
-    "token_type": "NO",
-    "question": "Will OpenAI not IPO by December 31, 2026?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 15.92,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "59405816357054997632711068734450950071946240481171324713469217993570263323448",
-    "token_type": "YES",
-    "question": "Will Reza Pahlavi be head of state in Iran end of 2026?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 104.55000000000001,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "54089169111079990961961042311671090509331754191323634696605710645713245697210",
-    "token_type": "NO",
-    "question": "Will Reza Pahlavi be head of state in Iran end of 2026?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 104.55000000000001,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "71639186972309675898276528548948460833492839687113431703224860884207762343959",
-    "token_type": "YES",
-    "question": "Liberal majority in Canadian Parliament by June 30?",
+    "question": "Will the Court Force Trump to Refund Tariffs?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 28.630000000000003,
+    "volatility_sum": 34.56999999999999,
     "source": "Normal LP"
   },
   {
-    "token_id": "113060994234598574063229391483061061335611988979671879375616581174161121485389",
+    "token_id": "12522399465485053436854565134102940007271969526119674646143207634472973813769",
     "token_type": "NO",
-    "question": "Liberal majority in Canadian Parliament by June 30?",
+    "question": "Will the Court Force Trump to Refund Tariffs?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 28.630000000000003,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "87589026160299272955629422766314779919880994101280556671908608112857665615986",
-    "token_type": "YES",
-    "question": "OpenAI IPO closing market cap above $800B?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 17.240000000000002,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "28757375488252180837220115919596104547492289038169041781409290799158740344188",
-    "token_type": "NO",
-    "question": "OpenAI IPO closing market cap above $800B?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 17.240000000000002,
+    "volatility_sum": 34.56999999999999,
     "source": "Normal LP"
   },
   {
@@ -766,7 +566,7 @@
     "min_size": 20.0,
     "neg_risk": true,
     "max_spread": 0.035,
-    "volatility_sum": 18.81,
+    "volatility_sum": 18.79,
     "source": "Normal LP"
   },
   {
@@ -776,67 +576,27 @@
     "min_size": 20.0,
     "neg_risk": true,
     "max_spread": 0.035,
-    "volatility_sum": 18.81,
+    "volatility_sum": 18.79,
     "source": "Normal LP"
   },
   {
-    "token_id": "19884202204363090591845974364927513432419394537229594683046302661092511466716",
+    "token_id": "68671366615449911083206544634122659980182050807847635039820242738577392906636",
     "token_type": "YES",
-    "question": "Will Ulf Kristersson be the next Prime Minister of Sweden?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 16.41,
+    "question": "US/Israel strike on Fordow nuclear facility by March 31?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 46.72,
     "source": "Normal LP"
   },
   {
-    "token_id": "35202785175624473743133325350336939697145393245733500300951742752216521350176",
+    "token_id": "15383684067596502149123204844216805492228844396215325931845777976929865529565",
     "token_type": "NO",
-    "question": "Will Ulf Kristersson be the next Prime Minister of Sweden?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 16.41,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "80822496881187464044904323930735374814391442763100022480297070361136099568761",
-    "token_type": "YES",
-    "question": "SpaceX IPO closing market cap above $1.8T?",
-    "min_size": 20.0,
+    "question": "US/Israel strike on Fordow nuclear facility by March 31?",
+    "min_size": 200.0,
     "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 25.0,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "30427687464154883708138843011596245466741607842619929142307799202727981279551",
-    "token_type": "NO",
-    "question": "SpaceX IPO closing market cap above $1.8T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 25.0,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "73608378798865044984261735099675348741092728789196282435464649551995587538344",
-    "token_type": "YES",
-    "question": "Will Iran name a successor to Khamenei by March 31?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 60.650000000000006,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "108303883282805733621907786823092933798578046999240564428529854116806430319839",
-    "token_type": "NO",
-    "question": "Will Iran name a successor to Khamenei by March 31?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 60.650000000000006,
+    "max_spread": 0.055,
+    "volatility_sum": 46.72,
     "source": "Normal LP"
   },
   {
@@ -846,7 +606,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 16.03,
+    "volatility_sum": 15.92,
     "source": "Normal LP"
   },
   {
@@ -856,47 +616,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 16.03,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "25335588587775299220522629630450090894992761076711207104201140528353393877506",
-    "token_type": "YES",
-    "question": "Will Gold (GC) hit (HIGH) $5,700 by end of June?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 17.61,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "97038309429340978439365498316427711090789716945970412439610202229191101927793",
-    "token_type": "NO",
-    "question": "Will Gold (GC) hit (HIGH) $5,700 by end of June?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 17.61,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "11340300774955055916605801683872908814619579266178190949493090071671877358047",
-    "token_type": "YES",
-    "question": "Will the Silicon Data H100 Index (SDH100RT) hit $2.00 (LOW) by April 30, 2026?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 20.29,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "23628957372293120699534049091780229196501378623067077949003504072786027079542",
-    "token_type": "NO",
-    "question": "Will the Silicon Data H100 Index (SDH100RT) hit $2.00 (LOW) by April 30, 2026?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 20.29,
+    "volatility_sum": 15.92,
     "source": "Normal LP"
   },
   {
@@ -920,63 +640,143 @@
     "source": "Normal LP"
   },
   {
-    "token_id": "91347242536105459969213788769929618447748782724898414007495579710952664644740",
+    "token_id": "11340300774955055916605801683872908814619579266178190949493090071671877358047",
     "token_type": "YES",
-    "question": "US strike on Cuba by December 31?",
+    "question": "Will the Silicon Data H100 Index (SDH100RT) hit $2.00 (LOW) by April 30, 2026?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 20.29,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "23628957372293120699534049091780229196501378623067077949003504072786027079542",
+    "token_type": "NO",
+    "question": "Will the Silicon Data H100 Index (SDH100RT) hit $2.00 (LOW) by April 30, 2026?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 20.29,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "19884202204363090591845974364927513432419394537229594683046302661092511466716",
+    "token_type": "YES",
+    "question": "Will Ulf Kristersson be the next Prime Minister of Sweden?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 16.41,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "35202785175624473743133325350336939697145393245733500300951742752216521350176",
+    "token_type": "NO",
+    "question": "Will Ulf Kristersson be the next Prime Minister of Sweden?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 16.41,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "71639186972309675898276528548948460833492839687113431703224860884207762343959",
+    "token_type": "YES",
+    "question": "Liberal majority in Canadian Parliament by June 30?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 44.42,
+    "volatility_sum": 22.130000000000003,
     "source": "Normal LP"
   },
   {
-    "token_id": "55782999195478978645683058282751482473275270795090145277907596121415418369349",
+    "token_id": "113060994234598574063229391483061061335611988979671879375616581174161121485389",
     "token_type": "NO",
-    "question": "US strike on Cuba by December 31?",
+    "question": "Liberal majority in Canadian Parliament by June 30?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 44.42,
+    "volatility_sum": 22.130000000000003,
     "source": "Normal LP"
   },
   {
-    "token_id": "104670482580508957710169110674758095664796430666591779353969904691172237111486",
+    "token_id": "54066963382974859240347310461020134785981724636635890298517360968400982528991",
     "token_type": "YES",
-    "question": "U.S. anti-cartel ground operation in Mexico by June 30?",
+    "question": "Will Angela Rayner be the next Prime Minister of the United Kingdom in 2026?",
+    "min_size": 200.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 15.62,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "341760906399923559682824982870791179504347648524865319277821837070071218382",
+    "token_type": "NO",
+    "question": "Will Angela Rayner be the next Prime Minister of the United Kingdom in 2026?",
+    "min_size": 200.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 15.62,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "2011448762453318924331890857436552502625185273746051467874416268100776921808",
+    "token_type": "YES",
+    "question": "OpenAI IPO closing market cap above $1T?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 21.919999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "37374318395281167819702754225484522381204606804163579477698382571172669062027",
+    "token_type": "NO",
+    "question": "OpenAI IPO closing market cap above $1T?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 21.919999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "91598277451888833943457869299081344513189737907823485218592748863763321112699",
+    "token_type": "YES",
+    "question": "Will Russia capture Kostyantynivka by April 30?",
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 21.189999999999998,
+    "volatility_sum": 26.770000000000003,
     "source": "Normal LP"
   },
   {
-    "token_id": "63484481107647122168088064516182388887132159693102897724855474391526233036103",
+    "token_id": "53831658761992660262271167425488866803302305236549476786294052519241195037228",
     "token_type": "NO",
-    "question": "U.S. anti-cartel ground operation in Mexico by June 30?",
+    "question": "Will Russia capture Kostyantynivka by April 30?",
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 21.189999999999998,
+    "volatility_sum": 26.770000000000003,
     "source": "Normal LP"
   },
   {
-    "token_id": "68283792174293775430535402015214113701251372409839518501034763677920213819299",
+    "token_id": "59411759672535099435785833121223295555283509539295935025608356568397817014349",
     "token_type": "YES",
-    "question": "US-Iran nuclear deal by June 30?",
+    "question": "Katy Perry confirmed pregnant by June 30?",
     "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 47.35,
+    "max_spread": 0.045,
+    "volatility_sum": 16.01,
     "source": "Normal LP"
   },
   {
-    "token_id": "10690391194840875541563517589463912963575786539307433160985752952931887140267",
+    "token_id": "2589695031577120830587921092763449427846693656219752909813741499515485836579",
     "token_type": "NO",
-    "question": "US-Iran nuclear deal by June 30?",
+    "question": "Katy Perry confirmed pregnant by June 30?",
     "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 47.35,
+    "max_spread": 0.045,
+    "volatility_sum": 16.01,
     "source": "Normal LP"
   },
   {
@@ -1000,203 +800,183 @@
     "source": "Normal LP"
   },
   {
-    "token_id": "64873759235836285759433963153564476696368251894659048693711318733282140962729",
+    "token_id": "108404583612412017900991614858319938451930820299691195982097842688880737648604",
     "token_type": "YES",
-    "question": "Will Russia enter Druzkhivka by June 30?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 18.08,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "12189953254757703901325817136807905828235414540096236570030539521489183912836",
-    "token_type": "NO",
-    "question": "Will Russia enter Druzkhivka by June 30?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 18.08,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "67636248562641989253322881833295634597348537935436116678308038493491931802075",
-    "token_type": "YES",
-    "question": "Will Balendra “Balen” Shah be the next Prime Minister of Nepal?",
-    "min_size": 200.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 26.69,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "103458936615147854337140383793844639244540921656806174358476580389766439939128",
-    "token_type": "NO",
-    "question": "Will Balendra “Balen” Shah be the next Prime Minister of Nepal?",
-    "min_size": 200.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 26.69,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "98129295875005849359232613994336808299106374839453559059517190490414528155092",
-    "token_type": "YES",
-    "question": "Ukraine officially agrees to a US backed ceasefire framework by June 30?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 17.11,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "37251786892594326537435119887561603611665137452042941584472086350746589330816",
-    "token_type": "NO",
-    "question": "Ukraine officially agrees to a US backed ceasefire framework by June 30?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 17.11,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "108764967523246847280795673663140501195616935827676866483328873573195911966032",
-    "token_type": "YES",
-    "question": "Will Elon Musk’s net worth be less than $640b on March 31?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 57.78,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "36546421143474167552455656755286376457027284090253347327577735802274410221029",
-    "token_type": "NO",
-    "question": "Will Elon Musk’s net worth be less than $640b on March 31?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 57.78,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "19426830997860641827867742428794225516264548638293070052741093336218482490309",
-    "token_type": "YES",
-    "question": "Iran x Israel/US conflict ends by May 15?",
+    "question": "Trump announces end of military operations against Iran by March 31st?",
     "min_size": 200.0,
     "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 47.56,
+    "max_spread": 0.055,
+    "volatility_sum": 37.050000000000004,
     "source": "Normal LP"
   },
   {
-    "token_id": "31869663470674113137413574637244458645080626094263106105850314096988098095887",
+    "token_id": "34435661373185108947701533193158508381976569118430837490472138190364158331702",
     "token_type": "NO",
-    "question": "Iran x Israel/US conflict ends by May 15?",
+    "question": "Trump announces end of military operations against Iran by March 31st?",
     "min_size": 200.0,
     "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 37.050000000000004,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "39613364913865315931514386378018944414998874795564653895884416470707478023814",
+    "token_type": "YES",
+    "question": "Miguel Díaz-Canel out as leader of Cuba by June 30?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 37.709999999999994,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "58505293773838465935116525784998147381307821161678906360166240694093964623719",
+    "token_type": "NO",
+    "question": "Miguel Díaz-Canel out as leader of Cuba by June 30?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 37.709999999999994,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "104670482580508957710169110674758095664796430666591779353969904691172237111486",
+    "token_type": "YES",
+    "question": "U.S. anti-cartel ground operation in Mexico by June 30?",
+    "min_size": 100.0,
+    "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 47.56,
+    "volatility_sum": 20.57,
     "source": "Normal LP"
   },
   {
-    "token_id": "79061180657059618586760238413063599341723464600586044738174282266677206810971",
-    "token_type": "YES",
-    "question": "Will OpenAI have a #1 AI model by June 30?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 26.200000000000003,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "9479884184976001563204558696867984479593169560947811640823883499454903136803",
+    "token_id": "63484481107647122168088064516182388887132159693102897724855474391526233036103",
     "token_type": "NO",
-    "question": "Will OpenAI have a #1 AI model by June 30?",
-    "min_size": 20.0,
+    "question": "U.S. anti-cartel ground operation in Mexico by June 30?",
+    "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 26.200000000000003,
+    "max_spread": 0.045,
+    "volatility_sum": 20.57,
     "source": "Normal LP"
   },
   {
-    "token_id": "111624140514182231337409851544772617326875062090065875736475168821343200371098",
+    "token_id": "25528137535014137486337039202211732452629120461534907668307876640779893870260",
     "token_type": "YES",
-    "question": "Kevin Warsh confirmed as Fed Chair by May 1?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 27.310000000000002,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "65194514534340200857179918259450457768327105663697225489104584618165143589098",
-    "token_type": "NO",
-    "question": "Kevin Warsh confirmed as Fed Chair by May 1?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 27.310000000000002,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "20842410381180463347855060331166403156123833248336891438529704189017345410180",
-    "token_type": "YES",
-    "question": "Will The Gap (GAP) beat quarterly earnings?",
+    "question": "Will USD reach 1.8M Iranian rials by March 31?",
     "min_size": 50.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 19.1,
+    "volatility_sum": 47.230000000000004,
     "source": "Normal LP"
   },
   {
-    "token_id": "95769235471080325921846950574217355092190563422846138609373281691831685140041",
+    "token_id": "74331037844358921619961076877697004388710493381160312127590656693861253579332",
     "token_type": "NO",
-    "question": "Will The Gap (GAP) beat quarterly earnings?",
+    "question": "Will USD reach 1.8M Iranian rials by March 31?",
     "min_size": 50.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 19.1,
+    "volatility_sum": 47.230000000000004,
     "source": "Normal LP"
   },
   {
-    "token_id": "108316728041518281704887256800802949352945536949411336573388553465090865742267",
+    "token_id": "23072428889948871919916997912866343746006774483855187447858489211364943872755",
     "token_type": "YES",
-    "question": "Will Luis Fernando Camacho win the 2026 Santa Cruz gubernatorial election?",
-    "min_size": 20.0,
-    "neg_risk": true,
+    "question": "Iran x Israel/US conflict ends by June 30?",
+    "min_size": 200.0,
+    "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 29.150000000000002,
+    "volatility_sum": 39.57000000000001,
     "source": "Normal LP"
   },
   {
-    "token_id": "86831318898329200669549315446465508627108001189919178636845627399712020009018",
+    "token_id": "103799449565939648641249283675043265448904133572321099361316887955408449940585",
     "token_type": "NO",
-    "question": "Will Luis Fernando Camacho win the 2026 Santa Cruz gubernatorial election?",
-    "min_size": 20.0,
-    "neg_risk": true,
+    "question": "Iran x Israel/US conflict ends by June 30?",
+    "min_size": 200.0,
+    "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 29.150000000000002,
+    "volatility_sum": 39.57000000000001,
     "source": "Normal LP"
   },
   {
-    "token_id": "10776578084439550181526173165818979034936800182797800156144227188229495479910",
+    "token_id": "75987598109512044463820332434591057998770245487148439713552095734920138718810",
     "token_type": "YES",
-    "question": "NYSE marketwide circuit breaker before 2027?",
+    "question": "Will an Anthropic Claude model score at least 45% on Humanity’s Last Exam?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 18.18,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "91769965734787101435433250449337100837747599753548347559006331995787875323332",
+    "token_type": "NO",
+    "question": "Will an Anthropic Claude model score at least 45% on Humanity’s Last Exam?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 18.18,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "79605660806991457811890435537160628976099500543939220857753925926896831621219",
+    "token_type": "YES",
+    "question": "Will Crude Oil (CL) hit (HIGH) $100 by end of March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 95.53999999999999,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "92274168594309301674860132535303917340223623966677593281435938105131107664927",
+    "token_type": "NO",
+    "question": "Will Crude Oil (CL) hit (HIGH) $100 by end of March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 95.53999999999999,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "68283792174293775430535402015214113701251372409839518501034763677920213819299",
+    "token_type": "YES",
+    "question": "US-Iran nuclear deal by June 30?",
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 22.05,
+    "volatility_sum": 48.120000000000005,
     "source": "Normal LP"
   },
   {
-    "token_id": "47244521176243504831320010374030626206943608425325384795080723420898313839532",
+    "token_id": "10690391194840875541563517589463912963575786539307433160985752952931887140267",
     "token_type": "NO",
-    "question": "NYSE marketwide circuit breaker before 2027?",
+    "question": "US-Iran nuclear deal by June 30?",
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 22.05,
+    "volatility_sum": 48.120000000000005,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "87726306233867174895916877369821121775472954680372928690435002065237468144594",
+    "token_type": "YES",
+    "question": "Will the UK designate the IRGC a terrorist organization by June 30?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 19.919999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "108259029989756390071753019240339637279033020549311423369246569675248825915713",
+    "token_type": "NO",
+    "question": "Will the UK designate the IRGC a terrorist organization by June 30?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 19.919999999999998,
     "source": "Normal LP"
   },
   {
@@ -1206,7 +986,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 28.54,
+    "volatility_sum": 28.48,
     "source": "Normal LP"
   },
   {
@@ -1216,27 +996,27 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 28.54,
+    "volatility_sum": 28.48,
     "source": "Normal LP"
   },
   {
-    "token_id": "48415598117950998813668194547924169333853002963929921505783256757891425660989",
+    "token_id": "18730978422362583344635704599452590050275452404041361625425790481762026934944",
     "token_type": "YES",
-    "question": "Will Mette Frederiksen be the next prime minister of Denmark after the 2026 parliamentary elections?",
-    "min_size": 100.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 26.269999999999996,
+    "question": "Will Russia capture Hryshyne by March 31, 2026?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 30.71,
     "source": "Normal LP"
   },
   {
-    "token_id": "98370392921180853291246178911847358715619253727424412235366815685411062334831",
+    "token_id": "10253671204995955855444782611640888907645658450627326046642066563302828880619",
     "token_type": "NO",
-    "question": "Will Mette Frederiksen be the next prime minister of Denmark after the 2026 parliamentary elections?",
-    "min_size": 100.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 26.269999999999996,
+    "question": "Will Russia capture Hryshyne by March 31, 2026?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 30.71,
     "source": "Normal LP"
   },
   {
@@ -1260,443 +1040,123 @@
     "source": "Normal LP"
   },
   {
-    "token_id": "97380323795159718798067587453513144582247083359697151191381113800415951716841",
+    "token_id": "57356188459199062918932413452286275555305081649149824806904755945581670763061",
     "token_type": "YES",
-    "question": "Will Crude Oil (CL) hit (HIGH) $90 by end of March?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 119.10000000000001,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "6154554693749743390960620335843150897458198335826687161334693098840883043189",
-    "token_type": "NO",
-    "question": "Will Crude Oil (CL) hit (HIGH) $90 by end of March?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 119.10000000000001,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "7632660616257556856292350430471922583185164134554146864641046251141791449116",
-    "token_type": "YES",
-    "question": "Trump announces end of military operations against Iran by March 15th?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 65.41,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "107849735170591192191894193332775531173020699832524903176363144172193500577185",
-    "token_type": "NO",
-    "question": "Trump announces end of military operations against Iran by March 15th?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 65.41,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "18730978422362583344635704599452590050275452404041361625425790481762026934944",
-    "token_type": "YES",
-    "question": "Will Russia capture Hryshyne by March 31, 2026?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 32.0,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "10253671204995955855444782611640888907645658450627326046642066563302828880619",
-    "token_type": "NO",
-    "question": "Will Russia capture Hryshyne by March 31, 2026?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 32.0,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "1291454874125024564913411658636854434792972068510027777552181749936579562639",
-    "token_type": "YES",
-    "question": "Will the U.S. invade Cuba in 2026?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 46.2,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "46036307473347147486878725188057240439237346445231099615680388314304154599904",
-    "token_type": "NO",
-    "question": "Will the U.S. invade Cuba in 2026?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 46.2,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "55115078421062885512539156303747803058407616201213034911037320915726138659123",
-    "token_type": "YES",
-    "question": "Will the U.S. invade Iran before 2027?",
+    "question": "Will another country strike Iran by March 7?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 60.39,
+    "volatility_sum": 90.0,
     "source": "Normal LP"
   },
   {
-    "token_id": "1910830010387565971650098373488592514702818137344973088263643820608151819241",
+    "token_id": "25064626188502102104741406490122366915347491209651567794437835345531465570311",
     "token_type": "NO",
-    "question": "Will the U.S. invade Iran before 2027?",
+    "question": "Will another country strike Iran by March 7?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 60.39,
+    "volatility_sum": 90.0,
     "source": "Normal LP"
   },
   {
-    "token_id": "63838940441258823530555549739660969485906531481683303931681111898809688106528",
+    "token_id": "83617518285238151274836063590312610477192655509253955921300675735811392416805",
     "token_type": "YES",
-    "question": "US/Israel strike Yemen by March 31?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 44.61,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "63614902148966692934017750290048857275735851455796887849859730639377399410955",
-    "token_type": "NO",
-    "question": "US/Israel strike Yemen by March 31?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 44.61,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "56776530500098671171599967061469723260468860745199222945635902233837891265650",
-    "token_type": "YES",
-    "question": "Will xAI have a #1 AI model by June 30?",
+    "question": "Israel strike on Yemen by June 30, 2026?",
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 26.77,
+    "volatility_sum": 24.090000000000003,
     "source": "Normal LP"
   },
   {
-    "token_id": "18308394528464641302493182332141670647448231856323493096053358897537868355310",
+    "token_id": "49232347074200257286333705540570950896584522176544392767367009767750446431044",
     "token_type": "NO",
-    "question": "Will xAI have a #1 AI model by June 30?",
+    "question": "Israel strike on Yemen by June 30, 2026?",
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 26.77,
+    "volatility_sum": 24.090000000000003,
     "source": "Normal LP"
   },
   {
-    "token_id": "17489680037902594237794198688062349281460180114605156451267201732863734949575",
+    "token_id": "14251667098166579424752803022219371400042860829536733928979006418604563375050",
     "token_type": "YES",
-    "question": "Will Amazon (AMZN) close above $210 end of March?",
-    "min_size": 20.0,
+    "question": "Will Apple (AAPL) close above $260 end of March?",
+    "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.055,
-    "volatility_sum": 61.010000000000005,
+    "volatility_sum": 47.730000000000004,
     "source": "Normal LP"
   },
   {
-    "token_id": "103108140400546351131793972772223368742185262770235042895105856266030042645134",
+    "token_id": "76652370573371317832982742323582551308673570602511395207240997936896397421277",
     "token_type": "NO",
-    "question": "Will Amazon (AMZN) close above $210 end of March?",
-    "min_size": 20.0,
+    "question": "Will Apple (AAPL) close above $260 end of March?",
+    "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.055,
-    "volatility_sum": 61.010000000000005,
+    "volatility_sum": 47.730000000000004,
     "source": "Normal LP"
   },
   {
-    "token_id": "105391427639001472447115821835665244462841164022583489501682981070692707472382",
+    "token_id": "108316728041518281704887256800802949352945536949411336573388553465090865742267",
     "token_type": "YES",
-    "question": "Will Ukraine re-enter Novomykolaivka by March 31?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 52.480000000000004,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "57182727482204668664284172337983587629064867680745471047860064349387917388494",
-    "token_type": "NO",
-    "question": "Will Ukraine re-enter Novomykolaivka by March 31?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 52.480000000000004,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "673937465666834035830343616595258900863481365567719569392054078884751173883",
-    "token_type": "YES",
-    "question": "Will Al Mina be the Republican nominee for Senate in Virginia?",
-    "min_size": 50.0,
+    "question": "Will Luis Fernando Camacho win the 2026 Santa Cruz gubernatorial election?",
+    "min_size": 20.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 39.85,
+    "volatility_sum": 29.470000000000002,
     "source": "Normal LP"
   },
   {
-    "token_id": "95498703137942098625297484577046127414032569061243036564551369221530474230937",
+    "token_id": "86831318898329200669549315446465508627108001189919178636845627399712020009018",
     "token_type": "NO",
-    "question": "Will Al Mina be the Republican nominee for Senate in Virginia?",
-    "min_size": 50.0,
+    "question": "Will Luis Fernando Camacho win the 2026 Santa Cruz gubernatorial election?",
+    "min_size": 20.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 39.85,
+    "volatility_sum": 29.470000000000002,
     "source": "Normal LP"
   },
   {
-    "token_id": "2505045451674943447519228800725933725750838307553383437231238252001926532847",
+    "token_id": "96076518431843920442292630367661417212274890671660279177527169049762638545307",
     "token_type": "YES",
-    "question": "Will Gold (GC) hit (HIGH) $6,500 by end of June?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 36.96,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "96453137815807538822080192221173111606918794349637953317970702374401461307782",
-    "token_type": "NO",
-    "question": "Will Gold (GC) hit (HIGH) $6,500 by end of June?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 36.96,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "98881077241366761881109986065814397990166493850092078155993651651698961297655",
-    "token_type": "YES",
-    "question": "OpenAI IPO closing market cap above $1.4T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 41.28,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "76780605906753904520948508063550093759935938699551878923563015019767366597308",
-    "token_type": "NO",
-    "question": "OpenAI IPO closing market cap above $1.4T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 41.28,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "61149824827896123270843110203418822671205338586531528045562236956705553986931",
-    "token_type": "YES",
-    "question": "Will Crude Oil (CL) hit (HIGH) $80 by end of March?",
+    "question": "Will Tesla sell a Cybercab for 30k or less in 2026?",
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 74.65,
+    "volatility_sum": 32.86,
     "source": "Normal LP"
   },
   {
-    "token_id": "107064346433922317182357542794464553492324123930820423689236863646938961265730",
+    "token_id": "60953331900594527342588678000792388561050488042651109447945133897657984403462",
     "token_type": "NO",
-    "question": "Will Crude Oil (CL) hit (HIGH) $80 by end of March?",
+    "question": "Will Tesla sell a Cybercab for 30k or less in 2026?",
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 74.65,
+    "volatility_sum": 32.86,
     "source": "Normal LP"
   },
   {
-    "token_id": "101142391734693017743756087579917055932684199343956942928448112435664078458535",
+    "token_id": "54213045084040381850655794957078458856735663303348279211687545784642587687416",
     "token_type": "YES",
-    "question": "Will Silver (SI) hit (LOW) $60 by end of June?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 42.839999999999996,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "43103242398209127311663331220782506523756806218525480226979105861391236946899",
-    "token_type": "NO",
-    "question": "Will Silver (SI) hit (LOW) $60 by end of June?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 42.839999999999996,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "85294664825849314487313365791347030043756540349828467333196722835374988656717",
-    "token_type": "YES",
-    "question": "SpaceX IPO closing market cap above $2.4T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 37.86,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "103276380913639881587517324102875642830105121360974928889806663375095652121120",
-    "token_type": "NO",
-    "question": "SpaceX IPO closing market cap above $2.4T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 37.86,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "78344893574841608254460150654295398754667423734304368700204715752571964079877",
-    "token_type": "YES",
-    "question": "Will Russia enter Orikhiv by June 30?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 32.78,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "19635667132666660796022005356487276783852076798826892677535917154508370108010",
-    "token_type": "NO",
-    "question": "Will Russia enter Orikhiv by June 30?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 32.78,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "75826584762914288773548093422485697432600726607413560519157169930202022549252",
-    "token_type": "YES",
-    "question": "Will NVIDIA (NVDA) close above $180 end of March?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 37.089999999999996,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "126802275131175691542702047770275059807705244129160395398655884989359734330",
-    "token_type": "NO",
-    "question": "Will NVIDIA (NVDA) close above $180 end of March?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 37.089999999999996,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "3999342593280647042452483910263163646233798933994487696066026869520797779617",
-    "token_type": "YES",
-    "question": "OpenAI IPO closing market cap above $1.6T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 45.51,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "24008301120639626284183659345425473336217777877996805928583982207989440857223",
-    "token_type": "NO",
-    "question": "OpenAI IPO closing market cap above $1.6T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 45.51,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "1371309462052609112630282486406009296742382481218231104360518314805666949032",
-    "token_type": "YES",
-    "question": "Will Silver (SI) hit (HIGH) $130 by end of June?",
+    "question": "Will the US reopen its embassy in Iran in 2026?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 51.07,
+    "volatility_sum": 38.370000000000005,
     "source": "Normal LP"
   },
   {
-    "token_id": "95786928111554540112838418536182759689299529007001509645186275674840667242409",
+    "token_id": "13657611258353191201973828521127914557302182692217908076103195439294504815662",
     "token_type": "NO",
-    "question": "Will Silver (SI) hit (HIGH) $130 by end of June?",
+    "question": "Will the US reopen its embassy in Iran in 2026?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 51.07,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "86831555216352607458811867018842097191310281105831909967661155990095395482445",
-    "token_type": "YES",
-    "question": "Nothing Ever Happens: 2026",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 46.39,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "71744692901577421545451269158676141112520713445314804579626851509414309350462",
-    "token_type": "NO",
-    "question": "Nothing Ever Happens: 2026",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 46.39,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "59528430575002039974877371601639303686869751244866658786853981046174443210300",
-    "token_type": "YES",
-    "question": "Will Stripe acquire Paypal in 2026?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 41.03,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "110343134819315810457944768983092579947706564005451436251904465965729021119281",
-    "token_type": "NO",
-    "question": "Will Stripe acquire Paypal in 2026?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 41.03,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "69535608305491420566643091313992070411301780650198254308517668304539065617502",
-    "token_type": "YES",
-    "question": "Will NVIDIA reach $200 in March?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 48.379999999999995,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "79820751130619368678527241862752703133765385712736343453350582284121390561224",
-    "token_type": "NO",
-    "question": "Will NVIDIA reach $200 in March?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 48.379999999999995,
+    "volatility_sum": 38.370000000000005,
     "source": "Normal LP"
   },
   {
@@ -1706,7 +1166,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 31.81,
+    "volatility_sum": 30.03,
     "source": "Normal LP"
   },
   {
@@ -1716,27 +1176,407 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 31.81,
+    "volatility_sum": 30.03,
     "source": "Normal LP"
   },
   {
-    "token_id": "62174615336627888814453166657652087168672936561990669762061326057126859157348",
+    "token_id": "10776578084439550181526173165818979034936800182797800156144227188229495479910",
     "token_type": "YES",
-    "question": "Will Israel launch a major ground offensive in Lebanon by March 31?",
-    "min_size": 200.0,
+    "question": "NYSE marketwide circuit breaker before 2027?",
+    "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 68.02,
+    "volatility_sum": 23.479999999999997,
     "source": "Normal LP"
   },
   {
-    "token_id": "109194950528471238221689772140031366300756554661469112835221485697222266375845",
+    "token_id": "47244521176243504831320010374030626206943608425325384795080723420898313839532",
     "token_type": "NO",
-    "question": "Will Israel launch a major ground offensive in Lebanon by March 31?",
+    "question": "NYSE marketwide circuit breaker before 2027?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 23.479999999999997,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "55115078421062885512539156303747803058407616201213034911037320915726138659123",
+    "token_type": "YES",
+    "question": "Will the U.S. invade Iran before 2027?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 61.550000000000004,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "1910830010387565971650098373488592514702818137344973088263643820608151819241",
+    "token_type": "NO",
+    "question": "Will the U.S. invade Iran before 2027?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 61.550000000000004,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "48415598117950998813668194547924169333853002963929921505783256757891425660989",
+    "token_type": "YES",
+    "question": "Will Mette Frederiksen be the next prime minister of Denmark after the 2026 parliamentary elections?",
+    "min_size": 100.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 25.560000000000002,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "98370392921180853291246178911847358715619253727424412235366815685411062334831",
+    "token_type": "NO",
+    "question": "Will Mette Frederiksen be the next prime minister of Denmark after the 2026 parliamentary elections?",
+    "min_size": 100.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 25.560000000000002,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "48168789511019796326561692382483328599287550424901860031981073175513802044852",
+    "token_type": "YES",
+    "question": "Will the Kharg Island oil terminal be hit by March 31?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 78.16999999999999,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "75977476634405243658495066289117440835322693611692665806114706804740809740439",
+    "token_type": "NO",
+    "question": "Will the Kharg Island oil terminal be hit by March 31?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 78.16999999999999,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "55372485598399039761771640299696691166532917897712621388747591694002197375242",
+    "token_type": "YES",
+    "question": "Will Israel strike Gaza on March 6, 2026?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 69.9,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "102237216328238338846368820063017832083188258553552752648997407294004554349357",
+    "token_type": "NO",
+    "question": "Will Israel strike Gaza on March 6, 2026?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 69.9,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "105391427639001472447115821835665244462841164022583489501682981070692707472382",
+    "token_type": "YES",
+    "question": "Will Ukraine re-enter Novomykolaivka by March 31?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 49.66,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "57182727482204668664284172337983587629064867680745471047860064349387917388494",
+    "token_type": "NO",
+    "question": "Will Ukraine re-enter Novomykolaivka by March 31?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 49.66,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "7632660616257556856292350430471922583185164134554146864641046251141791449116",
+    "token_type": "YES",
+    "question": "Trump announces end of military operations against Iran by March 15th?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 65.37,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "107849735170591192191894193332775531173020699832524903176363144172193500577185",
+    "token_type": "NO",
+    "question": "Trump announces end of military operations against Iran by March 15th?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 65.37,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "673937465666834035830343616595258900863481365567719569392054078884751173883",
+    "token_type": "YES",
+    "question": "Will Al Mina be the Republican nominee for Senate in Virginia?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 38.11,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "95498703137942098625297484577046127414032569061243036564551369221530474230937",
+    "token_type": "NO",
+    "question": "Will Al Mina be the Republican nominee for Senate in Virginia?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 38.11,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "56776530500098671171599967061469723260468860745199222945635902233837891265650",
+    "token_type": "YES",
+    "question": "Will xAI have a #1 AI model by June 30?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 26.75,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "18308394528464641302493182332141670647448231856323493096053358897537868355310",
+    "token_type": "NO",
+    "question": "Will xAI have a #1 AI model by June 30?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 26.75,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "1291454874125024564913411658636854434792972068510027777552181749936579562639",
+    "token_type": "YES",
+    "question": "Will the U.S. invade Cuba in 2026?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 68.02,
+    "volatility_sum": 46.17,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "46036307473347147486878725188057240439237346445231099615680388314304154599904",
+    "token_type": "NO",
+    "question": "Will the U.S. invade Cuba in 2026?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 46.17,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "10991849228756847439673778874175365458450913336396982752046655649803657501964",
+    "token_type": "YES",
+    "question": "Will the Iranian regime fall before 2027?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 28.439999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "106181075047366745139197108801635573283215248045056329679360376976893016488727",
+    "token_type": "NO",
+    "question": "Will the Iranian regime fall before 2027?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 28.439999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "105951347394860056474565364761862342301253888671374632647012199696135875869718",
+    "token_type": "YES",
+    "question": "Will SpaceX's market cap be greater than $2.0T at market close on IPO day?",
+    "min_size": 20.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 41.45,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "13795751811519869239213937198950927458459889241833853031577017327053982913703",
+    "token_type": "NO",
+    "question": "Will SpaceX's market cap be greater than $2.0T at market close on IPO day?",
+    "min_size": 20.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 41.45,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "61149824827896123270843110203418822671205338586531528045562236956705553986931",
+    "token_type": "YES",
+    "question": "Will Crude Oil (CL) hit (HIGH) $80 by end of March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 73.97999999999999,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "107064346433922317182357542794464553492324123930820423689236863646938961265730",
+    "token_type": "NO",
+    "question": "Will Crude Oil (CL) hit (HIGH) $80 by end of March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 73.97999999999999,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "84658837439403207190848277920325277566884695272157788284346878279358839176145",
+    "token_type": "YES",
+    "question": "Will Gold (GC) hit (HIGH) $6,200 by end of June?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 34.87,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "30301198188279881696807884830906071909524881280096010668550610256066159855544",
+    "token_type": "NO",
+    "question": "Will Gold (GC) hit (HIGH) $6,200 by end of June?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 34.87,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "101142391734693017743756087579917055932684199343956942928448112435664078458535",
+    "token_type": "YES",
+    "question": "Will Silver (SI) hit (LOW) $60 by end of June?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 42.96,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "43103242398209127311663331220782506523756806218525480226979105861391236946899",
+    "token_type": "NO",
+    "question": "Will Silver (SI) hit (LOW) $60 by end of June?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 42.96,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "59528430575002039974877371601639303686869751244866658786853981046174443210300",
+    "token_type": "YES",
+    "question": "Will Stripe acquire Paypal in 2026?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 39.56,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "110343134819315810457944768983092579947706564005451436251904465965729021119281",
+    "token_type": "NO",
+    "question": "Will Stripe acquire Paypal in 2026?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 39.56,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "97067161137436059500420038333973740328814796972532094271628993589752144911307",
+    "token_type": "YES",
+    "question": "Will the US add between 50k and 75k jobs in February?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 36.62,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "77610897249003254661129130734830466364251792593648668014548482228953706859949",
+    "token_type": "NO",
+    "question": "Will the US add between 50k and 75k jobs in February?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 36.62,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "50225109718318658540280412494737610120319244416631769238081662045604870609068",
+    "token_type": "YES",
+    "question": "GTA 6 launch postponed again?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 30.689999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "78843465762942534439325485216626496263376463773713149868808423998036009560357",
+    "token_type": "NO",
+    "question": "GTA 6 launch postponed again?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 30.689999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "98881077241366761881109986065814397990166493850092078155993651651698961297655",
+    "token_type": "YES",
+    "question": "OpenAI IPO closing market cap above $1.4T?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 40.71000000000001,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "76780605906753904520948508063550093759935938699551878923563015019767366597308",
+    "token_type": "NO",
+    "question": "OpenAI IPO closing market cap above $1.4T?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 40.71000000000001,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "5500958648222024490080262026563017618333773328581609432182941377205770769101",
+    "token_type": "YES",
+    "question": "Israeli parliament dissolved by June 30?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 44.989999999999995,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "96591255635253447513110478554912401032108924846987730492523639752571136117102",
+    "token_type": "NO",
+    "question": "Israeli parliament dissolved by June 30?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 44.989999999999995,
     "source": "Normal LP"
   },
   {
@@ -1746,7 +1586,7 @@
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 42.39,
+    "volatility_sum": 41.64,
     "source": "Normal LP"
   },
   {
@@ -1756,67 +1596,47 @@
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 42.39,
+    "volatility_sum": 41.64,
     "source": "Normal LP"
   },
   {
-    "token_id": "46476602610094084078496245572560771380246513916629920659188116017227573024187",
+    "token_id": "78344893574841608254460150654295398754667423734304368700204715752571964079877",
     "token_type": "YES",
-    "question": "Will Silver (SI) settle at <$50 in June?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 36.04,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "72177638081483962222067242176685770438492835290670839956835987647418461026412",
-    "token_type": "NO",
-    "question": "Will Silver (SI) settle at <$50 in June?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 36.04,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "79605660806991457811890435537160628976099500543939220857753925926896831621219",
-    "token_type": "YES",
-    "question": "Will Crude Oil (CL) hit (HIGH) $100 by end of March?",
-    "min_size": 100.0,
+    "question": "Will Russia enter Orikhiv by June 30?",
+    "min_size": 50.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 96.0,
+    "volatility_sum": 31.11,
     "source": "Normal LP"
   },
   {
-    "token_id": "92274168594309301674860132535303917340223623966677593281435938105131107664927",
+    "token_id": "19635667132666660796022005356487276783852076798826892677535917154508370108010",
     "token_type": "NO",
-    "question": "Will Crude Oil (CL) hit (HIGH) $100 by end of March?",
-    "min_size": 100.0,
+    "question": "Will Russia enter Orikhiv by June 30?",
+    "min_size": 50.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 96.0,
+    "volatility_sum": 31.11,
     "source": "Normal LP"
   },
   {
-    "token_id": "82105809816199283118647119812956706823585611230208459927336128660661869401666",
+    "token_id": "3999342593280647042452483910263163646233798933994487696066026869520797779617",
     "token_type": "YES",
-    "question": "Will Israel strike 3 countries in 2026?",
-    "min_size": 100.0,
-    "neg_risk": true,
+    "question": "OpenAI IPO closing market cap above $1.6T?",
+    "min_size": 20.0,
+    "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 58.55,
+    "volatility_sum": 43.47,
     "source": "Normal LP"
   },
   {
-    "token_id": "10004681978922429095097130820293095008220189468151909204665849502856316229816",
+    "token_id": "24008301120639626284183659345425473336217777877996805928583982207989440857223",
     "token_type": "NO",
-    "question": "Will Israel strike 3 countries in 2026?",
-    "min_size": 100.0,
-    "neg_risk": true,
+    "question": "OpenAI IPO closing market cap above $1.6T?",
+    "min_size": 20.0,
+    "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 58.55,
+    "volatility_sum": 43.47,
     "source": "Normal LP"
   },
   {
@@ -1840,133 +1660,13 @@
     "source": "Normal LP"
   },
   {
-    "token_id": "48168789511019796326561692382483328599287550424901860031981073175513802044852",
-    "token_type": "YES",
-    "question": "Will the Kharg Island oil terminal be hit by March 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 81.37,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "75977476634405243658495066289117440835322693611692665806114706804740809740439",
-    "token_type": "NO",
-    "question": "Will the Kharg Island oil terminal be hit by March 31?",
-    "min_size": 200.0,
-    "neg_risk": false,
-    "max_spread": 0.055,
-    "volatility_sum": 81.37,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "27317168913038862638511498110536244347387854028485979359185236924713398325828",
-    "token_type": "YES",
-    "question": "Will Morgan Stanley or any of its underwriting affiliates serve as the lead underwriter in SpaceX’s initial public offering?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 41.260000000000005,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "60829860809638007934695920573955252245134246389919144508851803796838582284082",
-    "token_type": "NO",
-    "question": "Will Morgan Stanley or any of its underwriting affiliates serve as the lead underwriter in SpaceX’s initial public offering?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 41.260000000000005,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "40694709818065971643514811077441286580108877051947822538050267075191171848542",
-    "token_type": "YES",
-    "question": "Will Israel strike ≥4 countries in March 2026?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 84.59,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "106953136106636383516342685211067433382243656103112806246360465746037792393184",
-    "token_type": "NO",
-    "question": "Will Israel strike ≥4 countries in March 2026?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 84.59,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "64151240816761571171956506916106507330499387887551960704624884992923128958649",
-    "token_type": "YES",
-    "question": "Will the Bank of Russia make no change to the key rate after the March Meeting?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 38.78,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "21097360211362067746393172317956856132452346831029120574218561149047484437443",
-    "token_type": "NO",
-    "question": "Will the Bank of Russia make no change to the key rate after the March Meeting?",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 38.78,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "39950355963416356157631173094506842779469208412516932703493362317796946917782",
-    "token_type": "YES",
-    "question": "Will Alex De Paula be the Republican nominee for Senate in Virginia?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 57.11,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "97349147350827701509996333349162102940264823388717342511657158294027062292861",
-    "token_type": "NO",
-    "question": "Will Alex De Paula be the Republican nominee for Senate in Virginia?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 57.11,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "37178616561105489395812796428385214997612735622928169121859362122716882900013",
-    "token_type": "YES",
-    "question": "Will Tesla deliver between 350000 and 375000 vehicles in Q1 2026",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 49.06,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "65771154174055339252673611727082413057563254623934480725128136889093480003778",
-    "token_type": "NO",
-    "question": "Will Tesla deliver between 350000 and 375000 vehicles in Q1 2026",
-    "min_size": 20.0,
-    "neg_risk": true,
-    "max_spread": 0.035,
-    "volatility_sum": 49.06,
-    "source": "Normal LP"
-  },
-  {
     "token_id": "26244119549831204412293063691617590996016705899128364238145634000710346179934",
     "token_type": "YES",
     "question": "Megaquake by June 30?",
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 41.22,
+    "volatility_sum": 33.46,
     "source": "Normal LP"
   },
   {
@@ -1976,107 +1676,147 @@
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 41.22,
+    "volatility_sum": 33.46,
     "source": "Normal LP"
   },
   {
-    "token_id": "54213045084040381850655794957078458856735663303348279211687545784642587687416",
+    "token_id": "75028752776148090296091099469912621384650554615761384992997579209329182670110",
     "token_type": "YES",
-    "question": "Will the US reopen its embassy in Iran in 2026?",
+    "question": "Fed rate hike in 2026?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 43.9,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "93005850938352995663334573245996733794924636935158112548608169054144721737755",
+    "token_type": "NO",
+    "question": "Fed rate hike in 2026?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 43.9,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "82105809816199283118647119812956706823585611230208459927336128660661869401666",
+    "token_type": "YES",
+    "question": "Will Israel strike 3 countries in 2026?",
+    "min_size": 100.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 59.29,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "10004681978922429095097130820293095008220189468151909204665849502856316229816",
+    "token_type": "NO",
+    "question": "Will Israel strike 3 countries in 2026?",
+    "min_size": 100.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 59.29,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "46476602610094084078496245572560771380246513916629920659188116017227573024187",
+    "token_type": "YES",
+    "question": "Will Silver (SI) settle at <$50 in June?",
+    "min_size": 20.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 36.04,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "72177638081483962222067242176685770438492835290670839956835987647418461026412",
+    "token_type": "NO",
+    "question": "Will Silver (SI) settle at <$50 in June?",
+    "min_size": 20.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 36.04,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "18331875790552988478059784722938703116624618146031504902542136751224298396491",
+    "token_type": "YES",
+    "question": "DeepSeek V4 released by March 15?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 39.61,
+    "volatility_sum": 74.96000000000001,
     "source": "Normal LP"
   },
   {
-    "token_id": "13657611258353191201973828521127914557302182692217908076103195439294504815662",
+    "token_id": "79604528232948727310929342266363167112376947061009561908092836336406731912720",
     "token_type": "NO",
-    "question": "Will the US reopen its embassy in Iran in 2026?",
+    "question": "DeepSeek V4 released by March 15?",
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 39.61,
+    "volatility_sum": 74.96000000000001,
     "source": "Normal LP"
   },
   {
-    "token_id": "68062186193718462299081279996248877267844622678157499388279712107950932081939",
+    "token_id": "39950355963416356157631173094506842779469208412516932703493362317796946917782",
     "token_type": "YES",
-    "question": "Will the US conduct a cyberattack on Iran by March 31?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 71.77,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "115496014195490157731160170614015872723424106903095190882980382900693874363537",
-    "token_type": "NO",
-    "question": "Will the US conduct a cyberattack on Iran by March 31?",
-    "min_size": 100.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 71.77,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "25145310305415339802240321228289259311334724553610501346903005652239229384791",
-    "token_type": "YES",
-    "question": "OpenAI IPO closing market cap above $1.2T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 60.5,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "11473331847632135302775217443068248645904321176263023872939165587487930941087",
-    "token_type": "NO",
-    "question": "OpenAI IPO closing market cap above $1.2T?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 60.5,
-    "source": "Normal LP"
-  },
-  {
-    "token_id": "43592799490719695577921225466022050079162187363655460624317197061049263435346",
-    "token_type": "YES",
-    "question": "Will Troels Lund Poulsen be the next prime minister of Denmark after the 2026 parliamentary elections?",
-    "min_size": 100.0,
+    "question": "Will Alex De Paula be the Republican nominee for Senate in Virginia?",
+    "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 89.66,
+    "volatility_sum": 53.92,
     "source": "Normal LP"
   },
   {
-    "token_id": "96971326667210420894282164197690890769393662989679010859210776370213698606320",
+    "token_id": "97349147350827701509996333349162102940264823388717342511657158294027062292861",
     "token_type": "NO",
-    "question": "Will Troels Lund Poulsen be the next prime minister of Denmark after the 2026 parliamentary elections?",
-    "min_size": 100.0,
+    "question": "Will Alex De Paula be the Republican nominee for Senate in Virginia?",
+    "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 89.66,
+    "volatility_sum": 53.92,
     "source": "Normal LP"
   },
   {
-    "token_id": "43377185540092441472523885859099478235201860627294255832516299903130560463298",
+    "token_id": "4576347847245480575260753962072852009398058944437537080619261475961185008530",
     "token_type": "YES",
-    "question": "SCOTUS accepts sports event contract case by July 31, 2026?",
-    "min_size": 20.0,
+    "question": "Will Reza Pahlavi enter Iran by June 30?",
+    "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 39.66,
+    "volatility_sum": 66.28,
     "source": "Normal LP"
   },
   {
-    "token_id": "17398942423057686582491252867921221591924525918102079345877032638913486446065",
+    "token_id": "55092729280849474684479812101496415156653545865524951406784704033476400957407",
     "token_type": "NO",
-    "question": "SCOTUS accepts sports event contract case by July 31, 2026?",
-    "min_size": 20.0,
+    "question": "Will Reza Pahlavi enter Iran by June 30?",
+    "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 39.66,
+    "volatility_sum": 66.28,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "73608378798865044984261735099675348741092728789196282435464649551995587538344",
+    "token_type": "YES",
+    "question": "Will Iran name a successor to Khamenei by March 31?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 51.8,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "108303883282805733621907786823092933798578046999240564428529854116806430319839",
+    "token_type": "NO",
+    "question": "Will Iran name a successor to Khamenei by March 31?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 51.8,
     "source": "Normal LP"
   },
   {
@@ -2086,7 +1826,7 @@
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 56.73,
+    "volatility_sum": 51.08,
     "source": "Normal LP"
   },
   {
@@ -2096,27 +1836,107 @@
     "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 56.73,
+    "volatility_sum": 51.08,
     "source": "Normal LP"
   },
   {
-    "token_id": "62953677644194459197528921097582674684091952387130610769389378006736023659766",
+    "token_id": "68339523648891823346525943170923809752656111307494446683897840426837639357923",
     "token_type": "YES",
-    "question": "Starmer out by March 31, 2026?",
-    "min_size": 200.0,
+    "question": "Will Crude Oil (CL) hit (HIGH) $110 by end of March?",
+    "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 57.550000000000004,
+    "max_spread": 0.045,
+    "volatility_sum": 129.12,
     "source": "Normal LP"
   },
   {
-    "token_id": "81064263614611322976599369791100684944137505919329565340390899607649071360756",
+    "token_id": "109253640243354454232596456456880185663864119063714736283077889183840297588906",
     "token_type": "NO",
-    "question": "Starmer out by March 31, 2026?",
-    "min_size": 200.0,
+    "question": "Will Crude Oil (CL) hit (HIGH) $110 by end of March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 129.12,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "85294664825849314487313365791347030043756540349828467333196722835374988656717",
+    "token_type": "YES",
+    "question": "SpaceX IPO closing market cap above $2.4T?",
+    "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 57.550000000000004,
+    "volatility_sum": 37.26,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "103276380913639881587517324102875642830105121360974928889806663375095652121120",
+    "token_type": "NO",
+    "question": "SpaceX IPO closing market cap above $2.4T?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 37.26,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "1371309462052609112630282486406009296742382481218231104360518314805666949032",
+    "token_type": "YES",
+    "question": "Will Silver (SI) hit (HIGH) $130 by end of June?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 44.92,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "95786928111554540112838418536182759689299529007001509645186275674840667242409",
+    "token_type": "NO",
+    "question": "Will Silver (SI) hit (HIGH) $130 by end of June?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 44.92,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "43377185540092441472523885859099478235201860627294255832516299903130560463298",
+    "token_type": "YES",
+    "question": "SCOTUS accepts sports event contract case by July 31, 2026?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 39.55,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "17398942423057686582491252867921221591924525918102079345877032638913486446065",
+    "token_type": "NO",
+    "question": "SCOTUS accepts sports event contract case by July 31, 2026?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 39.55,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "40694709818065971643514811077441286580108877051947822538050267075191171848542",
+    "token_type": "YES",
+    "question": "Will Israel strike ≥4 countries in March 2026?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 83.32999999999998,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "106953136106636383516342685211067433382243656103112806246360465746037792393184",
+    "token_type": "NO",
+    "question": "Will Israel strike ≥4 countries in March 2026?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 83.32999999999998,
     "source": "Normal LP"
   },
   {
@@ -2126,7 +1946,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 41.9,
+    "volatility_sum": 40.55,
     "source": "Normal LP"
   },
   {
@@ -2136,7 +1956,27 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 41.9,
+    "volatility_sum": 40.55,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "64151240816761571171956506916106507330499387887551960704624884992923128958649",
+    "token_type": "YES",
+    "question": "Will the Bank of Russia make no change to the key rate after the March Meeting?",
+    "min_size": 20.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 42.33,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "21097360211362067746393172317956856132452346831029120574218561149047484437443",
+    "token_type": "NO",
+    "question": "Will the Bank of Russia make no change to the key rate after the March Meeting?",
+    "min_size": 20.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 42.33,
     "source": "Normal LP"
   },
   {
@@ -2146,7 +1986,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 45.93000000000001,
+    "volatility_sum": 45.370000000000005,
     "source": "Normal LP"
   },
   {
@@ -2156,27 +1996,87 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 45.93000000000001,
+    "volatility_sum": 45.370000000000005,
     "source": "Normal LP"
   },
   {
-    "token_id": "33955188520896833048115959811816549716866192906937688660205174290095294083363",
+    "token_id": "40072303726638361421744160185082507735218857119975873617414543570285833777565",
     "token_type": "YES",
-    "question": "Will the Fed’s lower bound reach 2.5% or lower before 2027?",
-    "min_size": 20.0,
+    "question": "Will Samuel Alito announce his retirement by March 31, 2026?",
+    "min_size": 200.0,
     "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 65.76,
+    "max_spread": 0.045,
+    "volatility_sum": 64.22,
     "source": "Normal LP"
   },
   {
-    "token_id": "20423362327975461844489534239312100383284255615268693304859555284041698365194",
+    "token_id": "80757336368521319887092323987793362778797877355864804648084936116787924127759",
     "token_type": "NO",
-    "question": "Will the Fed’s lower bound reach 2.5% or lower before 2027?",
-    "min_size": 20.0,
+    "question": "Will Samuel Alito announce his retirement by March 31, 2026?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 64.22,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "7328072973899355705297677072418607468586389403280574518335559515248500056682",
+    "token_type": "YES",
+    "question": "Will France, UK, or Germany strike Iran by June 30?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 75.34,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "112418822297470572658312548631220776645321771603729476024056332596414394278374",
+    "token_type": "NO",
+    "question": "Will France, UK, or Germany strike Iran by June 30?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 75.34,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "98159741361155980551380628657556808047396116656310335797601767828645889592183",
+    "token_type": "YES",
+    "question": "Houthi strike on Israel by March 6, 2026?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 127.85,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "51885649563567202604286375166505701994224891387712211018621672079707422694808",
+    "token_type": "NO",
+    "question": "Houthi strike on Israel by March 6, 2026?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 127.85,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "62953677644194459197528921097582674684091952387130610769389378006736023659766",
+    "token_type": "YES",
+    "question": "Starmer out by March 31, 2026?",
+    "min_size": 200.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 65.76,
+    "volatility_sum": 68.99,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "81064263614611322976599369791100684944137505919329565340390899607649071360756",
+    "token_type": "NO",
+    "question": "Starmer out by March 31, 2026?",
+    "min_size": 200.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 68.99,
     "source": "Normal LP"
   },
   {
@@ -2186,7 +2086,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 50.72,
+    "volatility_sum": 50.099999999999994,
     "source": "Normal LP"
   },
   {
@@ -2196,27 +2096,27 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 50.72,
+    "volatility_sum": 50.099999999999994,
     "source": "Normal LP"
   },
   {
-    "token_id": "5500958648222024490080262026563017618333773328581609432182941377205770769101",
+    "token_id": "43592799490719695577921225466022050079162187363655460624317197061049263435346",
     "token_type": "YES",
-    "question": "Israeli parliament dissolved by June 30?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 45.89,
+    "question": "Will Troels Lund Poulsen be the next prime minister of Denmark after the 2026 parliamentary elections?",
+    "min_size": 100.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 92.29,
     "source": "Normal LP"
   },
   {
-    "token_id": "96591255635253447513110478554912401032108924846987730492523639752571136117102",
+    "token_id": "96971326667210420894282164197690890769393662989679010859210776370213698606320",
     "token_type": "NO",
-    "question": "Israeli parliament dissolved by June 30?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.035,
-    "volatility_sum": 45.89,
+    "question": "Will Troels Lund Poulsen be the next prime minister of Denmark after the 2026 parliamentary elections?",
+    "min_size": 100.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 92.29,
     "source": "Normal LP"
   },
   {
@@ -2226,7 +2126,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 59.44,
+    "volatility_sum": 58.01,
     "source": "Normal LP"
   },
   {
@@ -2236,7 +2136,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 59.44,
+    "volatility_sum": 58.01,
     "source": "Normal LP"
   },
   {
@@ -2246,7 +2146,7 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 65.59,
+    "volatility_sum": 61.41,
     "source": "Normal LP"
   },
   {
@@ -2256,47 +2156,87 @@
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 65.59,
+    "volatility_sum": 61.41,
     "source": "Normal LP"
   },
   {
-    "token_id": "71509936948005250299824886191637369678440589170453050864768530527695363193760",
+    "token_id": "25145310305415339802240321228289259311334724553610501346903005652239229384791",
     "token_type": "YES",
-    "question": "Will Hamas agree to disarm by March 31?",
+    "question": "OpenAI IPO closing market cap above $1.2T?",
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 65.84,
+    "volatility_sum": 60.17,
     "source": "Normal LP"
   },
   {
-    "token_id": "82815234586911477177140615865628025765116384259118936449891184750454874874244",
+    "token_id": "11473331847632135302775217443068248645904321176263023872939165587487930941087",
     "token_type": "NO",
-    "question": "Will Hamas agree to disarm by March 31?",
+    "question": "OpenAI IPO closing market cap above $1.2T?",
     "min_size": 20.0,
     "neg_risk": false,
     "max_spread": 0.035,
-    "volatility_sum": 65.84,
+    "volatility_sum": 60.17,
     "source": "Normal LP"
   },
   {
-    "token_id": "19690585307506258492860068570444715834693696321998630726069954274810827404734",
+    "token_id": "37178616561105489395812796428385214997612735622928169121859362122716882900013",
     "token_type": "YES",
-    "question": "Will Pete Hegseth enter Iran by June 30?",
-    "min_size": 50.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 80.77000000000001,
+    "question": "Will Tesla deliver between 350000 and 375000 vehicles in Q1 2026",
+    "min_size": 20.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 50.42,
     "source": "Normal LP"
   },
   {
-    "token_id": "95588176939033762961710387411997769292137658912332777076183802626258663295130",
+    "token_id": "65771154174055339252673611727082413057563254623934480725128136889093480003778",
     "token_type": "NO",
-    "question": "Will Pete Hegseth enter Iran by June 30?",
-    "min_size": 50.0,
+    "question": "Will Tesla deliver between 350000 and 375000 vehicles in Q1 2026",
+    "min_size": 20.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 50.42,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "102933966669939200643196302368435117270647708938629535121296095832516117295609",
+    "token_type": "YES",
+    "question": "Will any E.U. country strike Iran by March 31?",
+    "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 80.77000000000001,
+    "volatility_sum": 89.1,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "113492337493200211929043853456877800640109297601202739705909373807075206865968",
+    "token_type": "NO",
+    "question": "Will any E.U. country strike Iran by March 31?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 89.1,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "33955188520896833048115959811816549716866192906937688660205174290095294083363",
+    "token_type": "YES",
+    "question": "Will the Fed’s lower bound reach 2.5% or lower before 2027?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 63.26,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "20423362327975461844489534239312100383284255615268693304859555284041698365194",
+    "token_type": "NO",
+    "question": "Will the Fed’s lower bound reach 2.5% or lower before 2027?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 63.26,
     "source": "Normal LP"
   },
   {
@@ -2306,7 +2246,7 @@
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 75.91,
+    "volatility_sum": 77.03,
     "source": "Normal LP"
   },
   {
@@ -2316,7 +2256,27 @@
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.045,
-    "volatility_sum": 75.91,
+    "volatility_sum": 77.03,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "71509936948005250299824886191637369678440589170453050864768530527695363193760",
+    "token_type": "YES",
+    "question": "Will Hamas agree to disarm by March 31?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 65.82,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "82815234586911477177140615865628025765116384259118936449891184750454874874244",
+    "token_type": "NO",
+    "question": "Will Hamas agree to disarm by March 31?",
+    "min_size": 20.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 65.82,
     "source": "Normal LP"
   },
   {
@@ -2326,7 +2286,7 @@
     "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 71.84,
+    "volatility_sum": 67.63,
     "source": "Normal LP"
   },
   {
@@ -2336,7 +2296,107 @@
     "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 71.84,
+    "volatility_sum": 67.63,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "106155402155566217155298602049930748730124212700717712307930128878848505215157",
+    "token_type": "YES",
+    "question": "Will Crude Oil (CL) hit (LOW) $65 by end of March?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.065,
+    "volatility_sum": 98.33,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "88601441660200288458744575753519531715229298928264040597008655372819793203289",
+    "token_type": "NO",
+    "question": "Will Crude Oil (CL) hit (LOW) $65 by end of March?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.065,
+    "volatility_sum": 98.33,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "68062186193718462299081279996248877267844622678157499388279712107950932081939",
+    "token_type": "YES",
+    "question": "Will the US conduct a cyberattack on Iran by March 31?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 70.67,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "115496014195490157731160170614015872723424106903095190882980382900693874363537",
+    "token_type": "NO",
+    "question": "Will the US conduct a cyberattack on Iran by March 31?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.035,
+    "volatility_sum": 70.67,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "19690585307506258492860068570444715834693696321998630726069954274810827404734",
+    "token_type": "YES",
+    "question": "Will Pete Hegseth enter Iran by June 30?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 79.27,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "95588176939033762961710387411997769292137658912332777076183802626258663295130",
+    "token_type": "NO",
+    "question": "Will Pete Hegseth enter Iran by June 30?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 79.27,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "4748258730063866743154225440817741601898634545205498086062514908018085180762",
+    "token_type": "YES",
+    "question": "Will the minimum Arctic sea ice extent this summer be between 4.0m & 4.2m square kilometers?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 64.67,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "40460851964794034276344575891314554282287606731199261123089897212134155757236",
+    "token_type": "NO",
+    "question": "Will the minimum Arctic sea ice extent this summer be between 4.0m & 4.2m square kilometers?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.045,
+    "volatility_sum": 64.67,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "13265448810970451421006542393165618576926964649374055337580146768273870202113",
+    "token_type": "YES",
+    "question": "Will Benjamin Netanyahu enter Iran by June 30?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 74.78,
+    "source": "Normal LP"
+  },
+  {
+    "token_id": "68249379252158272330152360947287312377399677973226451012595725236812305578666",
+    "token_type": "NO",
+    "question": "Will Benjamin Netanyahu enter Iran by June 30?",
+    "min_size": 50.0,
+    "neg_risk": false,
+    "max_spread": 0.045,
+    "volatility_sum": 74.78,
     "source": "Normal LP"
   },
   {
@@ -2346,7 +2406,7 @@
     "min_size": 20.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 128.55,
+    "volatility_sum": 126.60999999999999,
     "source": "Normal LP"
   },
   {
@@ -2356,47 +2416,67 @@
     "min_size": 20.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 128.55,
+    "volatility_sum": 126.60999999999999,
     "source": "Normal LP"
   },
   {
-    "token_id": "102238774938384156120233247823185312510318123121716876177265603401430807861072",
+    "token_id": "79542791066184500834508473050021405034292437772593335316772202369387142423405",
     "token_type": "YES",
-    "question": "Will Iran announce a new supreme leader on March 4, 2026?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 205.32,
+    "question": "Will Netflix reach $105 in March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 78.09,
     "source": "High Reward"
   },
   {
-    "token_id": "80717604777813624490993454790540157259747376232681946162607553739297325765813",
+    "token_id": "6664656956184585840325330278425575646159273252289869337122787073679499582265",
     "token_type": "NO",
-    "question": "Will Iran announce a new supreme leader on March 4, 2026?",
-    "min_size": 50.0,
-    "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 205.32,
+    "question": "Will Netflix reach $105 in March?",
+    "min_size": 100.0,
+    "neg_risk": false,
+    "max_spread": 0.055,
+    "volatility_sum": 78.09,
     "source": "High Reward"
   },
   {
-    "token_id": "15503753033516700320697369935554495160402320549389311672508496396404660447388",
+    "token_id": "101812000896787446859457868068969421423740383362375644010650936720421865018934",
     "token_type": "YES",
-    "question": "Will Iran announce a new supreme leader on March 5, 2026?",
+    "question": "Will Andrew Tate post 100-129 posts from February 27 to March 6, 2026?",
     "min_size": 50.0,
     "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 279.65999999999997,
+    "max_spread": 0.035,
+    "volatility_sum": 190.76,
     "source": "High Reward"
   },
   {
-    "token_id": "100739109182856239311869790569408983524157179278087283214800564594021897410306",
+    "token_id": "98537613712935864809249281780225511745776561815837668572475067269250419856361",
     "token_type": "NO",
-    "question": "Will Iran announce a new supreme leader on March 5, 2026?",
+    "question": "Will Andrew Tate post 100-129 posts from February 27 to March 6, 2026?",
     "min_size": 50.0,
     "neg_risk": true,
-    "max_spread": 0.045,
-    "volatility_sum": 279.65999999999997,
+    "max_spread": 0.035,
+    "volatility_sum": 190.76,
+    "source": "High Reward"
+  },
+  {
+    "token_id": "83982667250057034698133648273435168221795120788978088906221227292229759798824",
+    "token_type": "YES",
+    "question": "Will Donald Trump post 200+ Truth Social posts from February 27 to March 6, 2026?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 206.92,
+    "source": "High Reward"
+  },
+  {
+    "token_id": "97120089395494256107379011361105728856117417102309721207021156065672800666532",
+    "token_type": "NO",
+    "question": "Will Donald Trump post 200+ Truth Social posts from February 27 to March 6, 2026?",
+    "min_size": 50.0,
+    "neg_risk": true,
+    "max_spread": 0.035,
+    "volatility_sum": 206.92,
     "source": "High Reward"
   },
   {
@@ -2406,7 +2486,7 @@
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.065,
-    "volatility_sum": 207.97,
+    "volatility_sum": 200.85,
     "source": "High Reward"
   },
   {
@@ -2416,67 +2496,47 @@
     "min_size": 100.0,
     "neg_risk": false,
     "max_spread": 0.065,
-    "volatility_sum": 207.97,
+    "volatility_sum": 200.85,
     "source": "High Reward"
   },
   {
-    "token_id": "16227544559776963884490503566905671476474324564342062343949278946230102275948",
+    "token_id": "111988618077786263362718284278451225707405623288593888751575373086664059387290",
     "token_type": "YES",
-    "question": "US announces military support of Kurds in Iran by March 31?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 92.1,
-    "source": "High Reward"
-  },
-  {
-    "token_id": "77125551615616645499045567834219963942711041631127610407012712709180412256494",
-    "token_type": "NO",
-    "question": "US announces military support of Kurds in Iran by March 31?",
-    "min_size": 20.0,
-    "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 92.1,
-    "source": "High Reward"
-  },
-  {
-    "token_id": "9924506626053711077213795039092263890533295106426633277643070281253160202514",
-    "token_type": "YES",
-    "question": "Will MrBeast's next video get between 60 and 70 million views on week 1?",
+    "question": "Will Mojtaba Khamenei be head of state in Iran end of 2026?",
     "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 98.34,
+    "volatility_sum": 411.77,
     "source": "High Reward"
   },
   {
-    "token_id": "11452222471291715220721660831588999742672320659414795029567609869634749101608",
+    "token_id": "42006549920912635238720143234628794318400295281074422564226738635663399130499",
     "token_type": "NO",
-    "question": "Will MrBeast's next video get between 60 and 70 million views on week 1?",
+    "question": "Will Mojtaba Khamenei be head of state in Iran end of 2026?",
     "min_size": 50.0,
     "neg_risk": true,
     "max_spread": 0.045,
-    "volatility_sum": 98.34,
+    "volatility_sum": 411.77,
     "source": "High Reward"
   },
   {
-    "token_id": "39739088073331931819116586064442937529886526253083793333640242450646769535410",
+    "token_id": "105507792451830438267071553453341713976876345832304283161234086335774758584012",
     "token_type": "YES",
-    "question": "Nothing Ever Happens: March",
-    "min_size": 50.0,
+    "question": "Will S&P 500 (SPX) close over $6,900 on the final trading day of March 2026?",
+    "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 84.15,
+    "max_spread": 0.055,
+    "volatility_sum": 76.53,
     "source": "High Reward"
   },
   {
-    "token_id": "3002616722088007329032619731352811436608940819206801511525887676214615582302",
+    "token_id": "41711036579600373182020662844352879470651291479800170583885847536151242771887",
     "token_type": "NO",
-    "question": "Nothing Ever Happens: March",
-    "min_size": 50.0,
+    "question": "Will S&P 500 (SPX) close over $6,900 on the final trading day of March 2026?",
+    "min_size": 100.0,
     "neg_risk": false,
-    "max_spread": 0.045,
-    "volatility_sum": 84.15,
+    "max_spread": 0.055,
+    "volatility_sum": 76.53,
     "source": "High Reward"
   }
 ]

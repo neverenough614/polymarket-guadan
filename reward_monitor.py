@@ -265,9 +265,13 @@ def get_market_info(condition_id: str) -> dict:
 # 📝 写入 Google 表格 New Rewards Alert
 # ======================================================
 # 最小赞助金额阈值（USDC）- 写入表格
-MIN_REWARD_AMOUNT = 100.0
+MIN_REWARD_AMOUNT = 800.0
 # 最小 Telegram 推送阈值（USDC）
-MIN_TELEGRAM_AMOUNT = 100.0
+MIN_TELEGRAM_AMOUNT = 800.0
+# 奖励巡检间隔（秒）- 定期检查已写入表格的市场奖励是否仍有效
+REWARD_CHECK_INTERVAL = 1800  # 30 分钟
+# 奖励失效清除的最低金额阈值（低于此值则从表格中移除）
+MIN_REWARD_TO_KEEP = 800.0
 # 表格名称（独立工作表，与 New Rewards Alert 区分）
 NEW_REWARDS_SHEET_NAME = "Chain Rewards Alert"
 
@@ -447,6 +451,222 @@ def format_and_send(log: dict, parsed: dict, market_info: dict, tx_hash: str):
 
 
 # ======================================================
+# 🔍 定期巡检：检查已写入表格的市场奖励是否仍有效
+# ======================================================
+def check_rewards_still_valid():
+    """
+    遍历 Chain Rewards Alert 表格中的所有市场，
+    调用 CLOB API 检查当前奖励是否仍有效且 >= MIN_REWARD_TO_KEEP。
+    如果奖励已过期或金额不足，从表格中删除该行并推送 Telegram 通知。
+    """
+    if not GOOGLE_SHEETS_ENABLED:
+        return
+
+    print(f"\n{'='*60}")
+    print(f"🔍 [奖励巡检] 开始检查已有市场的奖励有效性...")
+    print(f"{'='*60}")
+
+    try:
+        sh = get_spreadsheet()
+        try:
+            wk = sh.worksheet(NEW_REWARDS_SHEET_NAME)
+        except Exception:
+            print(f"   ℹ️ 工作表 '{NEW_REWARDS_SHEET_NAME}' 不存在，跳过巡检")
+            return
+
+        all_data = wk.get_all_values()
+        if not all_data or len(all_data) <= 1:
+            print(f"   ℹ️ 表格为空或只有表头，跳过巡检")
+            return
+
+        headers = all_data[0]
+        # 找到关键列的索引
+        try:
+            cid_col = headers.index("condition_id")
+        except ValueError:
+            print(f"   ⚠️ 表格中未找到 condition_id 列，跳过巡检")
+            return
+
+        try:
+            question_col = headers.index("question")
+        except ValueError:
+            question_col = None
+
+        try:
+            amount_col = headers.index("amount_usdc")
+        except ValueError:
+            amount_col = None
+
+        # 从最后一行开始检查（倒序删除，避免行号偏移）
+        rows_to_delete = []
+        now_ts = int(datetime.now(tz=timezone.utc).timestamp())
+
+        for row_idx in range(len(all_data) - 1, 0, -1):  # 跳过表头（第0行）
+            row = all_data[row_idx]
+            if len(row) <= cid_col:
+                continue
+
+            condition_id = row[cid_col].strip()
+            if not condition_id:
+                continue
+
+            question_str = row[question_col].strip() if question_col is not None and len(row) > question_col else "未知"
+            old_amount = 0
+            if amount_col is not None and len(row) > amount_col:
+                try:
+                    old_amount = float(row[amount_col])
+                except:
+                    old_amount = 0
+
+            # 调用 CLOB API 查询当前奖励状态
+            try:
+                url = f"{CLOB_API_URL}/{condition_id}"
+                resp = requests.get(url, timeout=10)
+                if resp.status_code != 200:
+                    print(f"   ⚠️ CLOB API 返回 {resp.status_code}，跳过: {question_str[:40]}...")
+                    continue
+
+                market_data = resp.json()
+                if not market_data or "error" in market_data:
+                    # 市场不存在或已关闭
+                    rows_to_delete.append({
+                        "row_num": row_idx + 1,  # Google Sheets 行号从1开始
+                        "question": question_str,
+                        "reason": "市场已关闭或不存在",
+                        "old_amount": old_amount,
+                    })
+                    continue
+
+                rewards = market_data.get("rewards", {})
+                if not rewards:
+                    # 没有奖励信息
+                    rows_to_delete.append({
+                        "row_num": row_idx + 1,
+                        "question": question_str,
+                        "reason": "奖励已取消（无 rewards 信息）",
+                        "old_amount": old_amount,
+                    })
+                    continue
+
+                # 检查奖励是否过期
+                reward_end_time = rewards.get("end_date", None)
+                if reward_end_time:
+                    try:
+                        # end_date 可能是 ISO 格式字符串或 unix timestamp
+                        if isinstance(reward_end_time, str):
+                            end_dt = datetime.fromisoformat(reward_end_time.replace("Z", "+00:00"))
+                            end_ts = int(end_dt.timestamp())
+                        else:
+                            end_ts = int(reward_end_time)
+
+                        if end_ts < now_ts:
+                            rows_to_delete.append({
+                                "row_num": row_idx + 1,
+                                "question": question_str,
+                                "reason": f"奖励已过期（结束时间: {datetime.fromtimestamp(end_ts, tz=TZ_UTC8).strftime('%Y-%m-%d %H:%M')}）",
+                                "old_amount": old_amount,
+                            })
+                            continue
+                    except Exception:
+                        pass  # 解析失败，不删除
+
+                # 检查当前奖励金额是否足够
+                # CLOB API 的 rewards 可能包含 rates 或其他字段表示当前奖励水平
+                # 尝试多种字段名
+                current_amount = None
+                for key in ["amount", "total_amount", "reward_amount"]:
+                    if key in rewards:
+                        try:
+                            current_amount = float(rewards[key])
+                            break
+                        except:
+                            pass
+
+                # 如果有 rates 字段（每日/每小时费率），计算剩余总奖励
+                if current_amount is None and "rates" in rewards:
+                    rates = rewards["rates"]
+                    if isinstance(rates, list) and rates:
+                        # 取第一个 rate
+                        try:
+                            rate_info = rates[0]
+                            daily_rate = float(rate_info.get("daily_rate", 0))
+                            if daily_rate > 0 and reward_end_time:
+                                remaining_days = max(0, (end_ts - now_ts) / 86400)
+                                current_amount = daily_rate * remaining_days
+                        except:
+                            pass
+
+                if current_amount is not None and current_amount < MIN_REWARD_TO_KEEP:
+                    rows_to_delete.append({
+                        "row_num": row_idx + 1,
+                        "question": question_str,
+                        "reason": f"奖励金额不足（当前: ${current_amount:.2f} < ${MIN_REWARD_TO_KEEP:.0f}）",
+                        "old_amount": old_amount,
+                    })
+                    continue
+
+                # 检查 active 状态
+                if rewards.get("active") is False or rewards.get("is_active") is False:
+                    rows_to_delete.append({
+                        "row_num": row_idx + 1,
+                        "question": question_str,
+                        "reason": "奖励已停用（active=false）",
+                        "old_amount": old_amount,
+                    })
+                    continue
+
+            except requests.exceptions.Timeout:
+                print(f"   ⚠️ CLOB API 超时，跳过: {question_str[:40]}...")
+                continue
+            except Exception as e:
+                print(f"   ⚠️ 检查失败: {question_str[:40]}... ({e})")
+                continue
+
+            # API 调用间隔，避免限流
+            time.sleep(0.5)
+
+        # 执行删除（倒序，避免行号偏移）
+        if rows_to_delete:
+            print(f"\n   🗑️ 发现 {len(rows_to_delete)} 个需要清除的市场：")
+            # 按行号倒序排列（从大到小删除）
+            rows_to_delete.sort(key=lambda x: x["row_num"], reverse=True)
+
+            removed_questions = []
+            for item in rows_to_delete:
+                row_num = item["row_num"]
+                question = item["question"]
+                reason = item["reason"]
+                old_amount = item["old_amount"]
+
+                print(f"      ❌ 行{row_num}: {question[:45]}... → {reason}")
+                try:
+                    wk.delete_rows(row_num)
+                    removed_questions.append(f"• {question[:50]}... (原${old_amount:.0f}) → {reason}")
+                except Exception as e:
+                    print(f"      ⚠️ 删除行{row_num}失败: {e}")
+
+            # 推送 Telegram 通知
+            if removed_questions:
+                msg = (
+                    f"🗑️ <b>奖励巡检：{len(removed_questions)} 个市场已清除</b>\n\n"
+                    + "\n".join(removed_questions)
+                    + f"\n\n⏰ {datetime.now(tz=TZ_UTC8).strftime('%Y-%m-%d %H:%M:%S UTC+8')}"
+                )
+                send_telegram(msg)
+        else:
+            print(f"   ✅ 所有市场奖励仍有效，无需清除")
+
+        remaining = len(all_data) - 1 - len(rows_to_delete)
+        print(f"\n   📋 巡检完成，剩余 {remaining} 个市场")
+        print(f"{'='*60}\n")
+
+    except Exception as e:
+        print(f"   ❌ [奖励巡检] 运行时错误: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# ======================================================
 # 🔄 主监控循环
 # ======================================================
 def monitor_rewards():
@@ -484,11 +704,21 @@ def monitor_rewards():
     )
 
     scan_count = 0
+    last_reward_check = 0  # 上次奖励巡检时间（unix timestamp）
 
     while True:
         try:
             scan_count += 1
             ts_str = datetime.now(tz=TZ_UTC8).strftime("%H:%M:%S")
+
+            # ── 定期奖励巡检（每 REWARD_CHECK_INTERVAL 秒）──────────
+            now_epoch = time.time()
+            if now_epoch - last_reward_check >= REWARD_CHECK_INTERVAL:
+                try:
+                    check_rewards_still_valid()
+                except Exception as e:
+                    print(f"\n❌ [奖励巡检] 异常: {e}")
+                last_reward_check = now_epoch
 
             logs = fetch_reward_events(last_block)
 
