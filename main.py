@@ -40,8 +40,8 @@ QUESTION_BLACKLIST_KEYWORDS = [
 # 与上面的 QUESTION_BLACKLIST_KEYWORDS（跳过第一档）不同，这里是彻底屏蔽
 QUESTION_HARD_BLACKLIST = [
     # 在这里添加你想完全屏蔽的关键词，每个一行，例如：
-    "Iran","Iranian","Israel","Oil","March", "Winner", "Champion", "NBA", "Presidential", "Leader", "Nominee", "Supreme", "Bitcoin", "Democratic", "Trump", "Elon",
-    "Gold",
+    #"Iran","Iranian","Israel","Oil","March", "Winner", "Champion", "NBA", "Presidential", "Leader", "Nominee", "Supreme", "Bitcoin", "Democratic", "Trump", "Elon",
+    #"Gold",
 ]
 
 DEPTH_THRESHOLD_TIER1   = 1500.0   # 第1档深度阈值（USDC），提高门槛确保只有深厚市场才挂第一档
@@ -258,10 +258,7 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
 
         # 🚫 硬黑名单：完全不挂单
         question_lower = question.lower()
-        hard_matched = next(
-            (kw for kw in QUESTION_HARD_BLACKLIST if kw.lower() in question_lower),
-            None
-        )
+        hard_matched = _is_hard_blacklisted(question)
         if hard_matched:
             print(f"   🚫 [硬黑名单] 跳过: {question[:55]}... (命中: '{hard_matched}') → 完全不挂单")
             continue
@@ -713,6 +710,116 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
 # ======================================================
 PLACE_ORDER_WORKERS = 8  # 并发挂单线程数（避免 API 限流）
 
+def _is_hard_blacklisted(question: str) -> Optional[str]:
+    """检查 question 是否命中硬黑名单，返回命中的关键词或 None"""
+    question_lower = question.lower()
+    return next(
+        (kw for kw in QUESTION_HARD_BLACKLIST if kw.lower() in question_lower),
+        None
+    )
+
+
+def _cleanup_blacklisted_orders(poly_client: PolymarketClient):
+    """
+    启动时扫描所有已有挂单，撤销命中硬黑名单的市场。
+    解决历史遗留挂单（黑名单生效前挂上去的）不会被自动清理的问题。
+    """
+    print(f"\n{'='*60}")
+    print(f"🚫 [启动清理] 扫描已有挂单，撤销命中硬黑名单的市场...")
+    print(f"{'='*60}")
+
+    if not poly_client:
+        print("   ⚠️ Client 未初始化，跳过清理")
+        return
+
+    try:
+        orders = poly_client.client.get_orders()
+        if not orders:
+            print("   ✅ 无活跃挂单，无需清理")
+            print(f"{'='*60}\n")
+            return
+
+        # 只处理 LIVE 状态的订单
+        live_orders = [o for o in orders if str(o.get('status', '')).upper() == 'LIVE']
+        if not live_orders:
+            print("   ✅ 无活跃挂单，无需清理")
+            print(f"{'='*60}\n")
+            return
+
+        # 收集所有活跃挂单的 token_id 和对应的 market 信息
+        # 注意：订单中可能没有 question 字段，需要从 market slug 或其他字段推断
+        # 但 Polymarket API 的订单通常包含 asset_id/token_id，不一定有 question
+        # 所以我们需要从 Google 表格中建立 token_id → question 的映射
+        print(f"   📋 发现 {len(live_orders)} 个活跃挂单，正在匹配黑名单...")
+
+        # 从表格加载 token_id → question 映射
+        token_to_question: Dict[str, str] = {}
+        try:
+            sh = get_spreadsheet()
+            for sheet_name in [STRATEGY_SHEET_NAME, AGGRESSIVE_SHEET_NAME, CHAIN_REWARDS_SHEET_NAME]:
+                try:
+                    wk = sh.worksheet(sheet_name)
+                    df = pd.DataFrame(wk.get_all_records())
+                    if not df.empty:
+                        for _, row in df.iterrows():
+                            q = str(row.get('question', '')).strip()
+                            if not q or q.lower() in ('', 'nan', 'none'):
+                                continue
+                            t1 = str(row.get('token1', '')).strip()
+                            if t1 and len(t1) > 10 and t1.lower() != 'nan':
+                                token_to_question[t1] = q
+                            if 'token2' in df.columns:
+                                t2 = str(row.get('token2', '')).strip()
+                                if t2 and len(t2) > 10 and t2.lower() != 'nan':
+                                    token_to_question[t2] = q
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"   ⚠️ 加载表格映射失败: {e}，将仅基于已有信息清理")
+
+        # 检查每个活跃挂单
+        tokens_to_cancel: Dict[str, str] = {}  # token_id → question
+        for o in live_orders:
+            token_id = o.get('token_id') or o.get('asset_id')
+            if not token_id:
+                continue
+            # 尝试从映射中获取 question
+            question = token_to_question.get(token_id, '')
+            if not question:
+                # 尝试从订单的其他字段获取（如 market slug）
+                market = o.get('market', '') or o.get('description', '') or ''
+                question = market
+            if question:
+                hard_kw = _is_hard_blacklisted(question)
+                if hard_kw and token_id not in tokens_to_cancel:
+                    tokens_to_cancel[token_id] = question
+                    print(f"   🚫 发现黑名单挂单: {question[:55]}... (命中: '{hard_kw}')")
+
+        if not tokens_to_cancel:
+            print("   ✅ 所有活跃挂单均未命中硬黑名单，无需清理")
+            print(f"{'='*60}\n")
+            return
+
+        # 撤销命中黑名单的挂单
+        print(f"\n   🧨 正在撤销 {len(tokens_to_cancel)} 个黑名单市场的挂单...")
+        cancelled = 0
+        for token_id, question in tokens_to_cancel.items():
+            try:
+                poly_client.cancel_all_asset(token_id)
+                cancelled += 1
+                print(f"      ✅ 已撤销: {question[:45]}... ({token_id[:10]}...)")
+            except Exception as e:
+                print(f"      ❌ 撤销失败: {question[:45]}... → {e}")
+
+        print(f"\n   🚫 [启动清理] 完成！撤销了 {cancelled}/{len(tokens_to_cancel)} 个黑名单市场的挂单")
+        print(f"{'='*60}\n")
+
+    except Exception as e:
+        print(f"   ❌ [启动清理] 扫描失败: {e}")
+        traceback.print_exc()
+        print(f"{'='*60}\n")
+
+
 def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
     global placed_orders_log, pending_retry_tokens
 
@@ -720,6 +827,18 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
     if not poly_client:
         print("[AutoPlace] ❌ PolymarketClient 未初始化，跳过挂单")
         return 0, len(strategy_tokens)
+
+    # 🚫 硬黑名单二次检查（兜底：防止重试队列等路径绕过黑名单）
+    filtered_tokens = []
+    for t in strategy_tokens:
+        hard_kw = _is_hard_blacklisted(t["question"])
+        if hard_kw:
+            print(f"   🚫 [硬黑名单·兜底] 跳过: {t['question'][:55]}... (命中: '{hard_kw}') → 完全不挂单")
+        else:
+            filtered_tokens.append(t)
+    if len(filtered_tokens) < len(strategy_tokens):
+        print(f"   🚫 硬黑名单兜底过滤: {len(strategy_tokens) - len(filtered_tokens)} 个被拦截")
+    strategy_tokens = filtered_tokens
 
     print(f"\n{'='*60}")
     print(f"🔍 [自动挂单] 并发分析 {len(strategy_tokens)} 个 token（{PLACE_ORDER_WORKERS} 线程）...")
@@ -995,6 +1114,9 @@ async def auto_close_positions_task(strategy_tokens: list):
     print(f"\n💰 [自动清仓] 任务已启动（每 {POSITION_CHECK_INTERVAL}s 检查，阈值: {MIN_POSITION_TO_CLOSE} shares）")
 
     token_map: Dict[str, Dict] = {}
+    # 清仓失败冷却：token_id → 下次可重试的时间戳（避免 404 等错误无限刷屏）
+    close_fail_cooldown: Dict[str, float] = {}
+    CLOSE_FAIL_COOLDOWN_SECONDS = 300  # 清仓失败后冷却 5 分钟再重试
 
     while True:
         await asyncio.sleep(POSITION_CHECK_INTERVAL)
@@ -1038,14 +1160,8 @@ async def auto_close_positions_task(strategy_tokens: list):
                             "neg_risk":   t.get("neg_risk", False),
                         })
                     else:
-                        # 手动挂单产生的持仓：也清仓
-                        positions_found.append({
-                            "token_id":   asset,
-                            "token_type": "MANUAL",
-                            "question":   f"手动挂单 ({asset[:10]}...)",
-                            "shares":     size,
-                            "neg_risk":   False,
-                        })
+                        # 手动持仓（网页端买入等）：跳过，不自动清仓
+                        pass
 
             if not positions_found:
                 continue
@@ -1644,6 +1760,9 @@ async def auto_place_and_monitor():
         await asyncio.sleep(2)
 
     print("[AutoPlace] ✅ PolymarketClient 已就绪")
+
+    # 🚫 启动时扫描已有挂单，撤销命中硬黑名单的市场（清理历史遗留）
+    await asyncio.to_thread(_cleanup_blacklisted_orders, global_state.client)
 
     strategy_tokens = await asyncio.to_thread(load_strategy_markets)
 
