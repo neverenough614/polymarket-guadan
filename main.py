@@ -49,6 +49,7 @@ DEPTH_THRESHOLD_TIER1   = 1500.0   # 第1档深度阈值（USDC），提高门�
 DEPTH_THRESHOLD_TIER2   = 200.0    # 第2、3档深度阈值（USDC）
 EXTREME_PRICE_THRESHOLD = 0.10     # 极端价格阈值（<0.10 或 >0.90 必须双向挂单）
 RETRY_INTERVAL          = 300      # 深度不足重试间隔（秒，5分钟）
+DEFENSE_RETRY_INTERVAL  = 60       # 防御撤单后快速重试间隔（秒，1分钟）
 SHEET_RELOAD_INTERVAL   = 300      # 表格重载间隔（秒）
 ENABLE_AUTO_PLACE       = True     # 是否启用自动挂单
 
@@ -68,7 +69,7 @@ MAX_ORDER_SIZE          = 500.0    # 默认上限
 # ======================================================
 # ⚙️ 自动清仓配置
 # ======================================================
-POSITION_CHECK_INTERVAL = 3       # 持仓检查间隔（秒），从3改为5降低API压力
+POSITION_CHECK_INTERVAL = 3       # 持仓检查间隔（秒）
 MIN_POSITION_TO_CLOSE   = 5.0      # 最小清仓阈值（shares）
 CLOSE_PRICE_OFFSET        = 0.02     # 基础清仓偏移（原0.01太保守，被吃后出不掉）
 CLOSE_PRICE_OFFSET_URGENT = 0.03     # 紧急清仓偏移（连续失败/极端市场用，更激进确保出掉）
@@ -89,7 +90,7 @@ MIN_SAME_DEPTH_SAFE             = 200.0   # 同档安全深度（USDC，排除�
 MIN_FRONT_DEPTH_THRESHOLD       = 100.0  # 前墙有无判断阈值（USDC）
 MIN_FRONT_DEPTH_ABSOLUTE        = 100.0   # 前墙绝对兜底线（USDC），低于此值直接撤单（原50太高）
 MIN_FRONT_DEPTH_ABSOLUTE_REF    = 0.0    # 设为0：历史高水位>0永远成立，等于直接启用绝对兜底
-MONITOR_CHECK_INTERVAL          = 1      # 扫描间隔3秒，降低API压力
+MONITOR_CHECK_INTERVAL          = 1      # 扫描间隔（秒）
 ENABLE_AUTO_DEFENSE             = True
 MAX_CONCURRENT_WORKERS          = 10
 ORDERBOOK_TIMEOUT               = 5
@@ -138,6 +139,8 @@ app.add_middleware(
 # 📊 全局状态
 # ======================================================
 placed_orders_log: List[Dict] = []
+placed_orders_log_lock = threading.Lock()
+MAX_PLACED_ORDERS_LOG = 500  # 最多保留最近 500 条挂单日志，防止内存泄漏
 pending_retry_tokens: List[Dict] = []
 pending_retry_lock = threading.Lock()
 
@@ -153,7 +156,7 @@ def _get_top_of_book(price_dict: Dict, depth: int, reverse: bool) -> List[Dict]:
         try:
             p_f = float(p)
             s_f = float(s)
-        except:
+        except (ValueError, TypeError):
             continue
         if s_f > 0:
             items.append((p_f, s_f))
@@ -301,7 +304,7 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
             min_size = float(str(row.get(min_size_col, 10)).replace(',', '')) if min_size_col else 10.0
             if min_size <= 0:
                 min_size = 10.0
-        except:
+        except (ValueError, TypeError):
             min_size = 10.0
 
         # neg_risk
@@ -319,7 +322,7 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
                     raw = float(ms_val)
                     if raw > 0:
                         max_spread = raw / 100.0 if max_spread_unit_cents else raw
-            except:
+            except (ValueError, TypeError):
                 max_spread = None
 
         # volatility_sum（用于波动率加权挂单量）
@@ -328,7 +331,7 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
         if vol_col:
             try:
                 vol_sum = float(str(row.get(vol_col, 0)).replace(',', ''))
-            except:
+            except (ValueError, TypeError):
                 vol_sum = 0.0
 
         def add_token(token_id, token_type):
@@ -527,7 +530,7 @@ def analyze_best_place_price_from_book(book, side: str,
                 # 孤立厚墙检测：第1档/第2档深度比 > 5，说明是大户撑场，跳过
                 if len(levels) >= 2:
                     tier2_depth = float(levels[1].price) * float(levels[1].size)
-                    if tier2_depth > 0 and depth / tier2_depth > 5.0:
+                    if tier2_depth > 0 and depth / tier2_depth > 3.5:
                         continue  # 第1档深度异常集中于单一档位，跳过
 
                 # 占比检查：挂单价值不超过该档深度的 20%（原1/3，更保守）
@@ -727,9 +730,9 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
 
 
 # ======================================================
-# 🚀 批量自动挂单（并发版，最多5线程）
+# 🚀 批量自动挂单（并发版）
 # ======================================================
-PLACE_ORDER_WORKERS = 8  # 并发挂单线程数（避免 API 限流）
+PLACE_ORDER_WORKERS = 8  # 并发挂单线程数
 
 def _is_hard_blacklisted(question: str) -> Optional[str]:
     """检查 question 是否命中硬黑名单，返回命中的关键词或 None"""
@@ -896,7 +899,10 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
 
     for i, token_info in enumerate(strategy_tokens):
         result = results_map.get(token_info["token_id"], {})
-        placed_orders_log.append(result)
+        with placed_orders_log_lock:
+            placed_orders_log.append(result)
+            if len(placed_orders_log) > MAX_PLACED_ORDERS_LOG:
+                placed_orders_log[:] = placed_orders_log[-MAX_PLACED_ORDERS_LOG:]
 
         buy_ok    = result.get("buy_status") == "placed"
         sell_ok   = result.get("sell_status") == "placed"
@@ -944,18 +950,45 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
 
 
 # ======================================================
-# 🔄 定期重试任务（深度不足的市场）
+# 🔄 定期重试任务（深度不足 / 防御撤单）
 # ======================================================
 async def periodic_retry_task():
+    """
+    每 DEFENSE_RETRY_INTERVAL 秒检查一次重试队列。
+    - 防御撤单的 token（带 _retry_at 标记）：到时间即重试
+    - 深度不足的 token（无标记）：等满 RETRY_INTERVAL 才重试
+    """
     while True:
-        await asyncio.sleep(RETRY_INTERVAL)
+        await asyncio.sleep(DEFENSE_RETRY_INTERVAL)
+        now = time.time()
         with pending_retry_lock:
-            tokens_to_retry = list(pending_retry_tokens)
-        if not tokens_to_retry:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔄 [重试] 无待重试 token，跳过")
+            # 区分：防御撤单（有 _retry_at）vs 深度不足（无 _retry_at）
+            ready = []
+            still_waiting = []
+            for t in pending_retry_tokens:
+                retry_at = t.get("_retry_at", 0)
+                if retry_at > 0:
+                    # 防御撤单：到时间即重试
+                    if now >= retry_at:
+                        ready.append(t)
+                    else:
+                        still_waiting.append(t)
+                else:
+                    # 深度不足：用更长的间隔，检查 _added_at
+                    added_at = t.get("_added_at", 0)
+                    if added_at == 0:
+                        t["_added_at"] = now
+                        still_waiting.append(t)
+                    elif now - added_at >= RETRY_INTERVAL:
+                        ready.append(t)
+                    else:
+                        still_waiting.append(t)
+            pending_retry_tokens[:] = still_waiting
+
+        if not ready:
             continue
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔄 [重试] 开始重试 {len(tokens_to_retry)} 个 token...")
-        await asyncio.to_thread(run_auto_place_orders, tokens_to_retry)
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔄 [重试] 开始重试 {len(ready)} 个 token...")
+        await asyncio.to_thread(run_auto_place_orders, ready)
 
 
 # ======================================================
@@ -1208,17 +1241,33 @@ async def auto_close_positions_task(strategy_tokens: list):
                 token_type = pos["token_type"]
                 neg_risk   = pos["neg_risk"]
 
+                # 🕐 冷却检查：清仓失败后等待一段时间再重试，避免无限刷屏
+                now_ts = time.time()
+                cooldown_until = close_fail_cooldown.get(token_id, 0)
+                if now_ts < cooldown_until:
+                    continue  # 仍在冷却中，静默跳过
+
                 print(f"\n   🎯 [{token_type}] {question[:40]}...")
                 print(f"      持仓: {shares:.2f} shares")
 
                 try:
+                    # 🔥 清仓前先撤掉该 token 的买单，避免"边清边买"循环
+                    try:
+                        poly_client.cancel_all_asset(token_id)
+                        print(f"      🧹 已撤销该 token 的所有挂单（防止边清边买）")
+                    except Exception as cancel_e:
+                        print(f"      ⚠️ 撤单失败（继续清仓）: {cancel_e}")
+
                     book = poly_client.client.get_order_book(token_id)
                     if not book or not book.bids:
                         print(f"      ❌ 无法获取订单簿，跳过")
+                        close_fail_cooldown[token_id] = now_ts + CLOSE_FAIL_COOLDOWN_SECONDS
                         continue
 
                     bids = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
-                    best_bid    = float(bids[0].price)
+                    asks = sorted(book.asks, key=lambda x: float(x.price), reverse=False) if book.asks else []
+                    best_bid = float(bids[0].price)
+                    best_ask = float(asks[0].price) if asks else None
 
                     # 清仓价格分级：极端市场/连续失败 → 更激进
                     attempts = close_attempt_count.get(token_id, 0)
@@ -1231,11 +1280,20 @@ async def auto_close_positions_task(strategy_tokens: list):
                     else:
                         offset = CLOSE_PRICE_OFFSET
                         tag = ""
+
+                    # 🔥 动态偏移：基于 spread 调整，避免窄 spread 市场偏移过大
+                    if best_ask is not None and best_ask > best_bid:
+                        spread = best_ask - best_bid
+                        spread_based_offset = max(offset, spread * 0.3)
+                        if spread_based_offset > offset:
+                            offset = round(spread_based_offset, 3)
+                            tag = f"{tag}，spread动态偏移" if tag else "spread动态偏移"
+
                     close_price = max(0.01, round(best_bid - offset, 2))
                     close_attempt_count[token_id] = attempts + 1
 
                     if tag:
-                        print(f"      ⚠️ {tag}，使用激进偏移 -{offset}")
+                        print(f"      ⚠️ {tag}，使用偏移 -{offset}")
                     print(f"      best_bid: ${best_bid:.3f} → 清仓价: ${close_price:.3f}")
                     print(f"      正在挂卖单: {shares:.2f} shares @ ${close_price:.3f}...")
 
@@ -1245,9 +1303,11 @@ async def auto_close_positions_task(strategy_tokens: list):
                         print(f"      ✅ 清仓单已提交！OrderID: {resp.get('orderID', resp)}")
                     else:
                         print(f"      ❌ 清仓失败: {resp}")
+                        close_fail_cooldown[token_id] = now_ts + CLOSE_FAIL_COOLDOWN_SECONDS
 
                 except Exception as e:
                     print(f"      ❌ 清仓出错: {e}")
+                    close_fail_cooldown[token_id] = time.time() + CLOSE_FAIL_COOLDOWN_SECONDS
 
             print(f"{'$'*60}\n")
 
@@ -1344,7 +1404,7 @@ def get_all_order_books_concurrent(poly_client: PolymarketClient, token_ids: Lis
                     returned_id, book, error = future.result()
                     if book:
                         results[returned_id] = book
-                except:
+                except Exception:
                     pass
         except concurrent.futures.TimeoutError:
             # 部分任务超时，已完成的结果已收集，继续使用
@@ -1390,6 +1450,67 @@ def cancel_specific_token_monitor(poly_client: PolymarketClient, token_id: str, 
         return False
 
 
+def cancel_one_side_orders(poly_client: PolymarketClient, token_id: str, side: str, question: str):
+    """
+    只撤指定方向（BUY/SELL）的挂单，保留另一方向。
+    """
+    side_cn = "买单" if side == "BUY" else "卖单"
+    print(f"\n🧨 正在撤销 [{question[:30]}] 的{side_cn}...")
+    try:
+        orders = poly_client.client.get_orders()
+        to_cancel = []
+        for o in orders:
+            if str(o.get("status", "")).upper() != "LIVE":
+                continue
+            tid = o.get("token_id") or o.get("asset_id")
+            if tid == token_id and o.get("side") == side:
+                oid = o.get("id")
+                if oid:
+                    to_cancel.append(oid)
+        if not to_cancel:
+            print(f"   无活跃{side_cn}需要撤销")
+            return False
+        for oid in to_cancel:
+            poly_client.client.cancel(oid)
+        print(f"✅ 已撤销 {len(to_cancel)} 个{side_cn}")
+        return True
+    except Exception as e:
+        print(f"⚠️ 单方向撤单失败: {e}，回退全撤")
+        try:
+            poly_client.cancel_all_asset(token_id)
+            return True
+        except Exception:
+            return False
+
+
+def emergency_close_position(poly_client: PolymarketClient, token_id: str,
+                              all_books: dict, neg_risk: bool = False):
+    """
+    紧急清仓：检查指定 token 是否有持仓，如有则立即挂卖单清仓。
+    同步函数，在 asyncio.to_thread 中调用。
+    返回 True 表示已提交清仓单。
+    """
+    try:
+        all_positions = poly_client.get_all_positions()
+        if all_positions is None:
+            return False
+        for _, pos_row in all_positions.iterrows():
+            if str(pos_row.get('asset', '')) == token_id:
+                pos_shares = float(pos_row.get('size', 0))
+                if pos_shares >= MIN_POSITION_TO_CLOSE:
+                    close_book = all_books.get(token_id)
+                    if close_book and close_book.bids:
+                        close_bids = sorted(close_book.bids, key=lambda x: float(x.price), reverse=True)
+                        close_best_bid = float(close_bids[0].price)
+                        close_price = max(0.01, round(close_best_bid - CLOSE_PRICE_OFFSET_URGENT, 2))
+                        print(f"   💰 [紧急清仓] 发现持仓 {pos_shares:.1f} shares，立即清仓 @ ${close_price:.3f}")
+                        poly_client.create_order(token_id, "SELL", close_price, pos_shares, neg_risk=neg_risk)
+                        return True
+    except Exception as close_e:
+        print(f"   ⚠️ [紧急清仓] 失败: {close_e}")
+    return False
+
+
 def _check_trend_threat(history: deque, label: str, is_extreme: bool = False) -> tuple:
     """检查深度历史是否呈连续下降趋势（慢刀子检测）。返回 (triggered, reason)"""
     if len(history) < TREND_MIN_CONSECUTIVE + 1:
@@ -1416,11 +1537,18 @@ def _check_trend_threat(history: deque, label: str, is_extreme: bool = False) ->
     return False, ""
 
 
-def check_bid_threats(state, my_bid_price, bid_front, bid_same, is_extreme=False):
+def check_side_threats(state, side: str, my_price, front_depth, same_depth, is_extreme=False):
+    """
+    通用的单方向威胁检测（合并原 check_bid_threats / check_ask_threats）。
+    side: "bid" 或 "ask"
+    """
     reasons = []
     triggered = False
-    if my_bid_price is None:
+    if my_price is None:
         return False, []
+
+    label = "买单" if side == "bid" else "卖单"
+
     # 根据是否极端价格市场选择参数集
     t_front_drop    = EXTREME_THRESHOLD_FRONT_DEPTH_DROP if is_extreme else THRESHOLD_FRONT_DEPTH_DROP
     t_same_drop     = EXTREME_THRESHOLD_SAME_DEPTH_DROP if is_extreme else THRESHOLD_SAME_DEPTH_DROP
@@ -1429,93 +1557,58 @@ def check_bid_threats(state, my_bid_price, bid_front, bid_same, is_extreme=False
     min_same_safe   = EXTREME_MIN_SAME_DEPTH_SAFE if is_extreme else MIN_SAME_DEPTH_SAFE
     min_front_abs   = EXTREME_MIN_FRONT_DEPTH_ABSOLUTE if is_extreme else MIN_FRONT_DEPTH_ABSOLUTE
 
-    was_behind_wall = state.last_bid_front_depth > MIN_FRONT_DEPTH_THRESHOLD
-    now_exposed     = bid_front <= MIN_FRONT_DEPTH_THRESHOLD
+    # 从 state 中获取对应方向的历史数据
+    last_front = getattr(state, f'last_{side}_front_depth')
+    last_same  = getattr(state, f'last_{side}_same_depth')
+    hw_front   = getattr(state, f'{side}_front_high_water')
+    hw_same    = getattr(state, f'{side}_same_high_water')
+    hist_front = getattr(state, f'{side}_front_history')
+    hist_same  = getattr(state, f'{side}_same_history')
+
+    was_behind_wall = last_front > MIN_FRONT_DEPTH_THRESHOLD
+    now_exposed     = front_depth <= MIN_FRONT_DEPTH_THRESHOLD
     if was_behind_wall and now_exposed:
-        drop_pct = (1 - bid_front / state.last_bid_front_depth) * 100 if state.last_bid_front_depth > 0 else 100
-        reasons.append(f"🚨 [跨分支] 买单前墙消失！前墙: ${state.last_bid_front_depth:.0f}→${bid_front:.0f} (-{drop_pct:.0f}%)")
+        drop_pct = (1 - front_depth / last_front) * 100 if last_front > 0 else 100
+        reasons.append(f"🚨 [跨分支] {label}前墙消失！前墙: ${last_front:.0f}→${front_depth:.0f} (-{drop_pct:.0f}%)")
         triggered = True
-    if bid_front < min_front_abs and state.bid_front_high_water > MIN_FRONT_DEPTH_ABSOLUTE_REF:
-        reasons.append(f"🚨 [绝对兜底] 买单前墙极度危险！当前: ${bid_front:.0f} (历史最高: ${state.bid_front_high_water:.0f})")
+    if front_depth < min_front_abs and hw_front > MIN_FRONT_DEPTH_ABSOLUTE_REF:
+        reasons.append(f"🚨 [绝对兜底] {label}前墙极度危险！当前: ${front_depth:.0f} (历史最高: ${hw_front:.0f})")
         triggered = True
-    if state.bid_front_high_water > MIN_FRONT_DEPTH_THRESHOLD and bid_front < state.bid_front_high_water * (1 - t_front_hw_drop):
-        reasons.append(f"🚨 [高水位] 买单前墙累计大幅下跌！高水位: ${state.bid_front_high_water:.0f}→当前: ${bid_front:.0f}")
+    if hw_front > MIN_FRONT_DEPTH_THRESHOLD and front_depth < hw_front * (1 - t_front_hw_drop):
+        reasons.append(f"🚨 [高水位] {label}前墙累计大幅下跌！高水位: ${hw_front:.0f}→当前: ${front_depth:.0f}")
         triggered = True
-    if bid_front > MIN_FRONT_DEPTH_THRESHOLD:
-        if state.last_bid_front_depth > MIN_FRONT_DEPTH_THRESHOLD and bid_front < state.last_bid_front_depth * (1 - t_front_drop):
-            reasons.append(f"🚨 [单轮] 买单前墙塌陷！${state.last_bid_front_depth:.0f}→${bid_front:.0f}")
+    if front_depth > MIN_FRONT_DEPTH_THRESHOLD:
+        if last_front > MIN_FRONT_DEPTH_THRESHOLD and front_depth < last_front * (1 - t_front_drop):
+            reasons.append(f"🚨 [单轮] {label}前墙塌陷！${last_front:.0f}→${front_depth:.0f}")
             triggered = True
     else:
-        if bid_same < min_same_safe:
-            reasons.append(f"🚨 [第一档] 买单深度太薄！同档: ${bid_same:.0f}")
+        if same_depth < min_same_safe:
+            reasons.append(f"🚨 [第一档] {label}深度太薄！同档: ${same_depth:.0f}")
             triggered = True
-        elif state.last_bid_same_depth > min_same_safe and bid_same < state.last_bid_same_depth * (1 - t_same_drop):
-            reasons.append(f"🚨 [第一档] 买单被大量吃掉！${state.last_bid_same_depth:.0f}→${bid_same:.0f}")
+        elif last_same > min_same_safe and same_depth < last_same * (1 - t_same_drop):
+            reasons.append(f"🚨 [第一档] {label}被大量吃掉！${last_same:.0f}→${same_depth:.0f}")
             triggered = True
-        if state.bid_same_high_water > min_same_safe and bid_same < state.bid_same_high_water * (1 - t_same_hw_drop):
-            reasons.append(f"🚨 [高水位] 第一档买单累计被吃！高水位: ${state.bid_same_high_water:.0f}→当前: ${bid_same:.0f}")
+        if hw_same > min_same_safe and same_depth < hw_same * (1 - t_same_hw_drop):
+            reasons.append(f"🚨 [高水位] 第一档{label}累计被吃！高水位: ${hw_same:.0f}→当前: ${same_depth:.0f}")
             triggered = True
     # 趋势检测（慢刀子）
-    trend_t, trend_r = _check_trend_threat(state.bid_front_history, "买单前墙", is_extreme)
+    trend_t, trend_r = _check_trend_threat(hist_front, f"{label}前墙", is_extreme)
     if trend_t:
         triggered = True
         reasons.append(trend_r)
-    trend_t2, trend_r2 = _check_trend_threat(state.bid_same_history, "买单同档", is_extreme)
+    trend_t2, trend_r2 = _check_trend_threat(hist_same, f"{label}同档", is_extreme)
     if trend_t2:
         triggered = True
         reasons.append(trend_r2)
     return triggered, reasons
 
+
+# 兼容旧调用名（防御主循环中使用）
+def check_bid_threats(state, my_bid_price, bid_front, bid_same, is_extreme=False):
+    return check_side_threats(state, "bid", my_bid_price, bid_front, bid_same, is_extreme)
 
 def check_ask_threats(state, my_ask_price, ask_front, ask_same, is_extreme=False):
-    reasons = []
-    triggered = False
-    if my_ask_price is None:
-        return False, []
-    # 根据是否极端价格市场选择参数集
-    t_front_drop    = EXTREME_THRESHOLD_FRONT_DEPTH_DROP if is_extreme else THRESHOLD_FRONT_DEPTH_DROP
-    t_same_drop     = EXTREME_THRESHOLD_SAME_DEPTH_DROP if is_extreme else THRESHOLD_SAME_DEPTH_DROP
-    t_front_hw_drop = EXTREME_THRESHOLD_FRONT_HIGH_WATER_DROP if is_extreme else THRESHOLD_FRONT_HIGH_WATER_DROP
-    t_same_hw_drop  = EXTREME_THRESHOLD_SAME_HIGH_WATER_DROP if is_extreme else THRESHOLD_SAME_HIGH_WATER_DROP
-    min_same_safe   = EXTREME_MIN_SAME_DEPTH_SAFE if is_extreme else MIN_SAME_DEPTH_SAFE
-    min_front_abs   = EXTREME_MIN_FRONT_DEPTH_ABSOLUTE if is_extreme else MIN_FRONT_DEPTH_ABSOLUTE
-
-    was_behind_wall = state.last_ask_front_depth > MIN_FRONT_DEPTH_THRESHOLD
-    now_exposed     = ask_front <= MIN_FRONT_DEPTH_THRESHOLD
-    if was_behind_wall and now_exposed:
-        drop_pct = (1 - ask_front / state.last_ask_front_depth) * 100 if state.last_ask_front_depth > 0 else 100
-        reasons.append(f"🚨 [跨分支] 卖单前墙消失！前墙: ${state.last_ask_front_depth:.0f}→${ask_front:.0f} (-{drop_pct:.0f}%)")
-        triggered = True
-    if ask_front < min_front_abs and state.ask_front_high_water > MIN_FRONT_DEPTH_ABSOLUTE_REF:
-        reasons.append(f"🚨 [绝对兜底] 卖单前墙极度危险！当前: ${ask_front:.0f} (历史最高: ${state.ask_front_high_water:.0f})")
-        triggered = True
-    if state.ask_front_high_water > MIN_FRONT_DEPTH_THRESHOLD and ask_front < state.ask_front_high_water * (1 - t_front_hw_drop):
-        reasons.append(f"🚨 [高水位] 卖单前墙累计大幅下跌！高水位: ${state.ask_front_high_water:.0f}→当前: ${ask_front:.0f}")
-        triggered = True
-    if ask_front > MIN_FRONT_DEPTH_THRESHOLD:
-        if state.last_ask_front_depth > MIN_FRONT_DEPTH_THRESHOLD and ask_front < state.last_ask_front_depth * (1 - t_front_drop):
-            reasons.append(f"🚨 [单轮] 卖单前墙塌陷！${state.last_ask_front_depth:.0f}→${ask_front:.0f}")
-            triggered = True
-    else:
-        if ask_same < min_same_safe:
-            reasons.append(f"🚨 [第一档] 卖单深度太薄！同档: ${ask_same:.0f}")
-            triggered = True
-        elif state.last_ask_same_depth > min_same_safe and ask_same < state.last_ask_same_depth * (1 - t_same_drop):
-            reasons.append(f"🚨 [第一档] 卖单被大量吃掉！${state.last_ask_same_depth:.0f}→${ask_same:.0f}")
-            triggered = True
-        if state.ask_same_high_water > min_same_safe and ask_same < state.ask_same_high_water * (1 - t_same_hw_drop):
-            reasons.append(f"🚨 [高水位] 第一档卖单累计被吃！高水位: ${state.ask_same_high_water:.0f}→当前: ${ask_same:.0f}")
-            triggered = True
-    # 趋势检测（慢刀子）
-    trend_t, trend_r = _check_trend_threat(state.ask_front_history, "卖单前墙", is_extreme)
-    if trend_t:
-        triggered = True
-        reasons.append(trend_r)
-    trend_t2, trend_r2 = _check_trend_threat(state.ask_same_history, "卖单同档", is_extreme)
-    if trend_t2:
-        triggered = True
-        reasons.append(trend_r2)
-    return triggered, reasons
+    return check_side_threats(state, "ask", my_ask_price, ask_front, ask_same, is_extreme)
 
 
 # ======================================================
@@ -1627,21 +1720,25 @@ async def monitor_defense_loop(strategy_tokens: list):
                         _imb_threshold = EXTREME_IMBALANCE_THRESHOLD if (best_bid_price is not None and is_extreme_price_market(best_bid_price)) else IMBALANCE_THRESHOLD
 
                         imbalance_triggered = False
+                        danger_side = None  # 危险方向：需要撤掉的一边
                         if bid_ratio < _imb_threshold and my_bid_price is not None:
                             imbalance_triggered = True
+                            danger_side = "BUY"  # 买方深度不足 → 价格可能下跌 → 买单危险
                             print(f"\n\n{'⚖'*10} 买卖深度偏斜检测 {'⚖'*10}")
                             print(f"⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                             print(f"🎯 目标: [{t['token_type']}] {t['question'][:45]}...")
-                            print(f"   🚨 [偏斜] 买方深度严重不足！买/卖={bid_ratio:.0%}/{ask_ratio:.0%} (${imb_bid_depth:.0f}/${imb_ask_depth:.0f})，价格可能下跌 → 撤单")
+                            print(f"   🚨 [偏斜] 买方深度严重不足！买/卖={bid_ratio:.0%}/{ask_ratio:.0%} (${imb_bid_depth:.0f}/${imb_ask_depth:.0f})，价格可能下跌 → 撤买单")
                         elif ask_ratio < _imb_threshold and my_ask_price is not None:
                             imbalance_triggered = True
+                            danger_side = "SELL"  # 卖方深度不足 → 价格可能上涨 → 卖单危险
                             print(f"\n\n{'⚖'*10} 买卖深度偏斜检测 {'⚖'*10}")
                             print(f"⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                             print(f"🎯 目标: [{t['token_type']}] {t['question'][:45]}...")
-                            print(f"   🚨 [偏斜] 卖方深度严重不足！买/卖={bid_ratio:.0%}/{ask_ratio:.0%} (${imb_bid_depth:.0f}/${imb_ask_depth:.0f})，价格可能上涨 → 撤单")
+                            print(f"   🚨 [偏斜] 卖方深度严重不足！买/卖={bid_ratio:.0%}/{ask_ratio:.0%} (${imb_bid_depth:.0f}/${imb_ask_depth:.0f})，价格可能上涨 → 撤卖单")
 
-                        if imbalance_triggered and ENABLE_AUTO_DEFENSE:
-                            await asyncio.to_thread(cancel_specific_token_monitor, poly_client, token_id, t["question"], t["token_type"])
+                        if imbalance_triggered and ENABLE_AUTO_DEFENSE and danger_side:
+                            # 只撤危险方向的单，保留安全方向
+                            await asyncio.to_thread(cancel_one_side_orders, poly_client, token_id, danger_side, t["question"])
                             state.first_run = True
                             state.reset_high_water()
                             # 🔄 加入重试队列
@@ -1650,26 +1747,14 @@ async def monitor_defense_loop(strategy_tokens: list):
                                 with pending_retry_lock:
                                     existing_ids = {x["token_id"] for x in pending_retry_tokens}
                                     if token_info_imb["token_id"] not in existing_ids:
+                                        token_info_imb["_retry_at"] = time.time() + DEFENSE_RETRY_INTERVAL
                                         pending_retry_tokens.append(token_info_imb)
-                                print(f"   📋 已加入重试队列（{len(pending_retry_tokens)} 个待重试）")
-                            # 💰 紧急清仓检查
-                            try:
-                                all_positions = await asyncio.to_thread(poly_client.get_all_positions)
-                                if all_positions is not None:
-                                    for _, pos_row in all_positions.iterrows():
-                                        if str(pos_row.get('asset', '')) == token_id:
-                                            pos_shares = float(pos_row.get('size', 0))
-                                            if pos_shares >= MIN_POSITION_TO_CLOSE:
-                                                close_book = all_books.get(token_id)
-                                                if close_book and close_book.bids:
-                                                    close_bids = sorted(close_book.bids, key=lambda x: float(x.price), reverse=True)
-                                                    close_best_bid = float(close_bids[0].price)
-                                                    close_price = max(0.01, round(close_best_bid - CLOSE_PRICE_OFFSET_URGENT, 2))
-                                                    print(f"   💰 [紧急清仓] 发现持仓 {pos_shares:.1f} shares，立即清仓 @ ${close_price:.3f}")
-                                                    await asyncio.to_thread(poly_client.create_order, token_id, "SELL", close_price, pos_shares, t.get("neg_risk", False))
-                                                    break
-                            except Exception as close_e:
-                                print(f"   ⚠️ [紧急清仓] 失败: {close_e}")
+                                print(f"   📋 已加入快速重试队列（{DEFENSE_RETRY_INTERVAL}s 后重试）")
+                            # 💰 紧急清仓检查（仅当买单被撤时才需要，因为持仓是买入的结果）
+                            if danger_side == "BUY":
+                                await asyncio.to_thread(
+                                    emergency_close_position, poly_client, token_id, all_books, t.get("neg_risk", False)
+                                )
                             print("⚖" * 30)
                             continue  # 已撤单，跳过本轮深度检测
 
@@ -1736,34 +1821,29 @@ async def monitor_defense_loop(strategy_tokens: list):
                             with pending_retry_lock:
                                 existing_ids = {t["token_id"] for t in pending_retry_tokens}
                                 if token_info_replace["token_id"] not in existing_ids:
+                                    token_info_replace["_retry_at"] = time.time() + DEFENSE_RETRY_INTERVAL
                                     pending_retry_tokens.append(token_info_replace)
-                            print(f"   📋 已加入重试队列（{len(pending_retry_tokens)} 个待重试），将在下次重试周期重新挂单")
+                            print(f"   📋 已加入快速重试队列（{DEFENSE_RETRY_INTERVAL}s 后重试）")
 
                         # 💰 防御撤单后立即清仓检查
-                        try:
-                            def_positions = await asyncio.to_thread(poly_client.get_all_positions)
-                            if def_positions is not None:
-                                for _, pos_row in def_positions.iterrows():
-                                    if str(pos_row.get('asset', '')) == token_id:
-                                        pos_shares = float(pos_row.get('size', 0))
-                                        if pos_shares >= MIN_POSITION_TO_CLOSE:
-                                            close_book = all_books.get(token_id)
-                                            if close_book and close_book.bids:
-                                                close_bids = sorted(close_book.bids, key=lambda x: float(x.price), reverse=True)
-                                                close_best_bid = float(close_bids[0].price)
-                                                close_price = max(0.01, round(close_best_bid - CLOSE_PRICE_OFFSET_URGENT, 2))
-                                                print(f"   💰 [紧急清仓] 发现持仓 {pos_shares:.1f} shares，立即清仓 @ ${close_price:.3f}")
-                                                await asyncio.to_thread(poly_client.create_order, token_id, "SELL", close_price, pos_shares, t.get("neg_risk", False))
-                                                break
-                        except Exception as close_e:
-                            print(f"   ⚠️ [紧急清仓] 失败: {close_e}")
+                        await asyncio.to_thread(
+                            emergency_close_position, poly_client, token_id, all_books, t.get("neg_risk", False)
+                        )
                     else:
                         print("⚠️ 防御未开启，仅报警")
                     print("!" * 70)
 
             loop_time  = time.time() - loop_start
-            print(f"\r[ {timestamp} ] 🛡️ 扫描 #{scan_count} | 活跃: {len(active_targets)}/{len(current_tokens)} | 耗时: {loop_time:.2f}s", end="", flush=True)
-            sleep_time = max(0.1, MONITOR_CHECK_INTERVAL - loop_time)
+            # 动态监控间隔：活跃 token 越多，间隔越长，降低 API 压力
+            active_count = len(active_targets)
+            if active_count <= 10:
+                dynamic_interval = MONITOR_CHECK_INTERVAL
+            elif active_count <= 30:
+                dynamic_interval = MONITOR_CHECK_INTERVAL * 2
+            else:
+                dynamic_interval = MONITOR_CHECK_INTERVAL * 3
+            print(f"\r[ {timestamp} ] 🛡️ 扫描 #{scan_count} | 活跃: {active_count}/{len(current_tokens)} | 耗时: {loop_time:.2f}s | 间隔: {dynamic_interval}s", end="", flush=True)
+            sleep_time = max(0.1, dynamic_interval - loop_time)
             await asyncio.sleep(sleep_time)
 
         except asyncio.CancelledError:
@@ -1800,7 +1880,7 @@ def list_markets():
                 markets.append({"asset_id": str(t1), "label": label})
             if t2 and str(t2) != "nan":
                 markets.append({"asset_id": str(t2), "label": label.replace(str(row.get('answer1')), str(row.get('answer2')))})
-        except:
+        except Exception:
             continue
     seen = set()
     unique = []
@@ -1827,11 +1907,15 @@ def get_orderbook(asset_id: str, depth: int = 10):
 
 @app.get("/orders/log")
 def get_orders_log():
+    with placed_orders_log_lock:
+        log_snapshot = list(placed_orders_log[-50:])
+        total = len(placed_orders_log)
+        placed_count = sum(1 for o in placed_orders_log if o.get("buy_status") == "placed" or o.get("sell_status") == "placed")
     return {
-        "total": len(placed_orders_log),
-        "placed_count": sum(1 for o in placed_orders_log if o.get("buy_status") == "placed" or o.get("sell_status") == "placed"),
+        "total": total,
+        "placed_count": placed_count,
         "pending_retry": len(pending_retry_tokens),
-        "log": placed_orders_log[-50:],
+        "log": log_snapshot,
     }
 
 
