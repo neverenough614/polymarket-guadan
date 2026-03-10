@@ -1,0 +1,93 @@
+{
+  "objective": "hybrid_risk_first",
+  "generated_at": "2026-03-09T11:24:10.395677+00:00",
+  "default": {
+    "NORMAL_SIZE_RATIO": 0.22,
+    "NORMAL_MAX_ORDER_SIZE": 600.0,
+    "AGGRESSIVE_SIZE_RATIO": 0.05,
+    "AGGRESSIVE_MAX_ORDER_SIZE": 200.0,
+    "CHAIN_REWARDS_SIZE_RATIO": 0.1,
+    "CHAIN_REWARDS_MAX_ORDER_SIZE": 500.0,
+    "DEPTH_THRESHOLD_TIER1": 1000.0,
+    "DEPTH_THRESHOLD_TIER2": 150.0,
+    "CLOSE_PRICE_OFFSET": 0.005,
+    "MIN_POSITION_TO_CLOSE": 3.0
+  },
+  "buckets": [
+    {
+      "name": "0-7",
+      "start_hour": 0,
+      "end_hour": 8,
+      "score": -10000.0,
+      "risk_ok": false,
+      "summary": {
+        "net_pnl": 0.0,
+        "reward": 0.0,
+        "max_drawdown": 0.0,
+        "max_single_close_loss": 0.0
+      },
+      "params": {
+        "NORMAL_SIZE_RATIO": 0.22,
+        "NORMAL_MAX_ORDER_SIZE": 600.0,
+        "AGGRESSIVE_SIZE_RATIO": 0.05,
+        "AGGRESSIVE_MAX_ORDER_SIZE": 200.0,
+        "CHAIN_REWARDS_SIZE_RATIO": 0.1,
+        "CHAIN_REWARDS_MAX_ORDER_SIZE": 500.0,
+        "DEPTH_THRESHOLD_TIER1": 1000.0,
+        "DEPTH_THRESHOLD_TIER2": 150.0,
+        "CLOSE_PRICE_OFFSET": 0.005,
+        "MIN_POSITION_TO_CLOSE": 3.0
+      }
+    },
+    {
+      "name": "8-15",
+      "start_hour": 8,
+      "end_hour": 16,
+      "score": -10000.0,
+      "risk_ok": false,
+      "summary": {
+        "net_pnl": 0.0,
+        "reward": 0.0,
+        "max_drawdown": 0.0,
+        "max_single_close_loss": 0.0
+      },
+      "params": {
+        "NORMAL_SIZE_RATIO": 0.22,
+        "NORMAL_MAX_ORDER_SIZE": 600.0,
+        "AGGRESSIVE_SIZE_RATIO": 0.05,
+        "AGGRESSIVE_MAX_ORDER_SIZE": 200.0,
+        "CHAIN_REWARDS_SIZE_RATIO": 0.1,
+        "CHAIN_REWARDS_MAX_ORDER_SIZE": 500.0,
+        "DEPTH_THRESHOLD_TIER1": 1000.0,
+        "DEPTH_THRESHOLD_TIER2": 150.0,
+        "CLOSE_PRICE_OFFSET": 0.005,
+        "MIN_POSITION_TO_CLOSE": 3.0
+      }
+    },
+    {
+      "name": "16-23",
+      "start_hour": 16,
+      "end_hour": 24,
+      "score": -10000.0,
+      "risk_ok": false,
+      "summary": {
+        "net_pnl": 0.0,
+        "reward": 0.0,
+        "max_drawdown": 0.0,
+        "max_single_close_loss": 0.0
+      },
+      "params": {
+        "NORMAL_SIZE_RATIO": 0.22,
+        "NORMAL_MAX_ORDER_SIZE": 600.0,
+        "AGGRESSIVE_SIZE_RATIO": 0.05,
+        "AGGRESSIVE_MAX_ORDER_SIZE": 200.0,
+        "CHAIN_REWARDS_SIZE_RATIO": 0.1,
+        "CHAIN_REWARDS_MAX_ORDER_SIZE": 500.0,
+        "DEPTH_THRESHOLD_TIER1": 1000.0,
+        "DEPTH_THRESHOLD_TIER2": 150.0,
+        "CLOSE_PRICE_OFFSET": 0.005,
+        "MIN_POSITION_TO_CLOSE": 3.0
+      }
+    }
+  ]
+}

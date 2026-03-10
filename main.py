@@ -40,6 +40,7 @@ QUESTION_BLACKLIST_KEYWORDS = [
 # 与上面的 QUESTION_BLACKLIST_KEYWORDS（跳过第一档）不同，这里是彻底屏蔽
 QUESTION_HARD_BLACKLIST = [
     # 在这里添加你想完全屏蔽的关键词，每个一行，例如：
+    "NFL"
     #"Iran","Iranian","Israel","Oil","March", "Winner", "Champion", "NBA", "Presidential", "Leader", "Nominee", "Supreme", "Bitcoin", "Democratic", "Trump", "Elon",
     #"Gold",
 ]
@@ -54,7 +55,7 @@ ENABLE_AUTO_PLACE       = True     # 是否启用自动挂单
 # 动态挂单量配置（分策略）
 # Normal LP：稳健策略，占比大、挂单量高
 NORMAL_SIZE_RATIO       = 0.30     # Normal LP 占前三档总深度 30%
-NORMAL_MAX_ORDER_SIZE   = 800.0    # Normal LP 最大 700 shares
+NORMAL_MAX_ORDER_SIZE   = 800.0    # Normal LP 最大 800 shares
 # High Reward：激进策略，占比小、挂单量低
 AGGRESSIVE_SIZE_RATIO   = 0.08     # High Reward 占前三档总深度 8%
 AGGRESSIVE_MAX_ORDER_SIZE = 300.0  # High Reward 最大 300 shares
@@ -368,24 +369,23 @@ def load_strategy_markets() -> List[Dict]:
         except Exception as e:
             print(f"   ⚠️ 读取 '{STRATEGY_SHEET_NAME}' 失败: {e}")
 
-        # ── 2. High Reward Aggressive（刀口舔血策略）──────────────
-        print(f"   📋 读取 '{AGGRESSIVE_SHEET_NAME}' ...")
-        try:
-            wk2 = sh.worksheet(AGGRESSIVE_SHEET_NAME)
-            df2 = pd.DataFrame(wk2.get_all_records())
-            if not df2.empty:
-                # 过滤掉提示行（question 列包含"当前无"的行）
-                df2 = df2[~df2['question'].astype(str).str.contains('当前无', na=False)]
-                if not df2.empty:
-                    n2 = _parse_sheet_tokens(df2, "High Reward", tokens, seen_token_ids,
-                                              max_spread_unit_cents=True)
-                    print(f"   ✅ '{AGGRESSIVE_SHEET_NAME}': {len(df2)} 行 → {n2} 个新 token")
-                else:
-                    print(f"   ⚠️ '{AGGRESSIVE_SHEET_NAME}' 无符合条件的市场")
-            else:
-                print(f"   ⚠️ '{AGGRESSIVE_SHEET_NAME}' 表格为空")
-        except Exception as e:
-            print(f"   ⚠️ 读取 '{AGGRESSIVE_SHEET_NAME}' 失败（可能尚未创建）: {e}")
+        # ── 2. High Reward Aggressive（已禁用）──────────────
+        # print(f"   📋 读取 '{AGGRESSIVE_SHEET_NAME}' ...")
+        # try:
+        #     wk2 = sh.worksheet(AGGRESSIVE_SHEET_NAME)
+        #     df2 = pd.DataFrame(wk2.get_all_records())
+        #     if not df2.empty:
+        #         df2 = df2[~df2['question'].astype(str).str.contains('当前无', na=False)]
+        #         if not df2.empty:
+        #             n2 = _parse_sheet_tokens(df2, "High Reward", tokens, seen_token_ids,
+        #                                       max_spread_unit_cents=True)
+        #             print(f"   ✅ '{AGGRESSIVE_SHEET_NAME}': {len(df2)} 行 → {n2} 个新 token")
+        #         else:
+        #             print(f"   ⚠️ '{AGGRESSIVE_SHEET_NAME}' 无符合条件的市场")
+        #     else:
+        #         print(f"   ⚠️ '{AGGRESSIVE_SHEET_NAME}' 表格为空")
+        # except Exception as e:
+        #     print(f"   ⚠️ 读取 '{AGGRESSIVE_SHEET_NAME}' 失败（可能尚未创建）: {e}")
 
         # ── 3. Chain Rewards Alert（链上自动发现的高奖励市场）──────
         print(f"   📋 读取 '{CHAIN_REWARDS_SHEET_NAME}' ...")
@@ -756,7 +756,7 @@ def _cleanup_blacklisted_orders(poly_client: PolymarketClient):
         token_to_question: Dict[str, str] = {}
         try:
             sh = get_spreadsheet()
-            for sheet_name in [STRATEGY_SHEET_NAME, AGGRESSIVE_SHEET_NAME, CHAIN_REWARDS_SHEET_NAME]:
+            for sheet_name in [STRATEGY_SHEET_NAME, CHAIN_REWARDS_SHEET_NAME]:
                 try:
                     wk = sh.worksheet(sheet_name)
                     df = pd.DataFrame(wk.get_all_records())

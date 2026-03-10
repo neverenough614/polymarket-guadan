@@ -135,21 +135,69 @@ def summarize_overall(metrics_df: pd.DataFrame) -> None:
     print()
 
 
+def summarize_backtest_compare(baseline_csv: str, optimized_csv: str) -> None:
+    base = pd.read_csv(baseline_csv)
+    opt = pd.read_csv(optimized_csv)
+    required = ["net_pnl", "reward", "fees", "max_drawdown", "max_single_close_loss"]
+    for col in required:
+        if col not in base.columns:
+            base[col] = 0.0
+        if col not in opt.columns:
+            opt[col] = 0.0
+
+    base_sum = base[required].sum(numeric_only=True)
+    opt_sum = opt[required].sum(numeric_only=True)
+    diff = opt_sum - base_sum
+
+    print("\n================= 参数对比（旧 vs 新） =================")
+    print(f"基线净收益 net_pnl          : {base_sum['net_pnl']:,.4f}")
+    print(f"优化净收益 net_pnl          : {opt_sum['net_pnl']:,.4f}")
+    print(f"净收益变化                  : {diff['net_pnl']:,.4f}")
+    print(f"奖励变化 reward             : {diff['reward']:,.4f}")
+    print(f"费用变化 fees               : {diff['fees']:,.4f}")
+    print(f"回撤变化 max_drawdown       : {diff['max_drawdown']:,.4f} (越接近0越好)")
+    print(f"单次清仓损失变化            : {diff['max_single_close_loss']:,.4f} (越接近0越好)")
+    print("========================================================\n")
+
+
+def summarize_bucket_best(candidates_csv: str) -> None:
+    cand = pd.read_csv(candidates_csv)
+    if cand.empty or "bucket_name" not in cand.columns or "score" not in cand.columns:
+        print("⚠️ 候选参数文件缺少 bucket_name/score，跳过分桶报告。")
+        return
+    cand = cand.sort_values(["bucket_name", "score"], ascending=[True, False])
+    best = cand.groupby("bucket_name", as_index=False).head(1)
+    cols = [c for c in ["bucket_name", "score", "risk_ok", "net_pnl", "max_drawdown", "max_single_close_loss"] if c in best.columns]
+    print("📌 分时段最优参数表现：")
+    print(best[cols].to_string(index=False, float_format=lambda x: f"{x:,.4f}"))
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(description="从历史交易/订单数据中统计 LP 策略的奖励、手续费与简单 PnL 代理。")
-    parser.add_argument("--trades-csv", required=True, help="包含历史成交记录的 CSV 文件路径")
+    parser.add_argument("--trades-csv", required=False, default=None, help="包含历史成交记录的 CSV 文件路径")
     parser.add_argument("--out-csv", default=None, help="导出按 asset+date 维度汇总后的指标到该 CSV")
+    parser.add_argument("--baseline-backtest-csv", default=None, help="旧参数回测输出 CSV（含 net_pnl 等字段）")
+    parser.add_argument("--optimized-backtest-csv", default=None, help="新参数回测输出 CSV（含 net_pnl 等字段）")
+    parser.add_argument("--candidates-csv", default=None, help="optimize_params 导出的候选参数 CSV，用于分时段最优报告")
     args = parser.parse_args()
 
-    cfg = MetricsConfig(trades_csv=args.trades_csv)
-    trades = load_trades(cfg)
-    metrics_df = compute_metrics(trades, cfg)
+    if args.trades_csv:
+        cfg = MetricsConfig(trades_csv=args.trades_csv)
+        trades = load_trades(cfg)
+        metrics_df = compute_metrics(trades, cfg)
 
-    summarize_overall(metrics_df)
+        summarize_overall(metrics_df)
 
-    if args.out_csv:
-        metrics_df.to_csv(args.out_csv, index=False)
-        print(f"✅ 已导出按 asset+date 汇总结果到: {args.out_csv}")
+        if args.out_csv:
+            metrics_df.to_csv(args.out_csv, index=False)
+            print(f"✅ 已导出按 asset+date 汇总结果到: {args.out_csv}")
+
+    if args.baseline_backtest_csv and args.optimized_backtest_csv:
+        summarize_backtest_compare(args.baseline_backtest_csv, args.optimized_backtest_csv)
+
+    if args.candidates_csv:
+        summarize_bucket_best(args.candidates_csv)
 
 
 if __name__ == "__main__":
