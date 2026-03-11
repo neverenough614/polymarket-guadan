@@ -31,7 +31,7 @@ QUESTION_BLACKLIST_KEYWORDS = [
     # 军事打击类
      "strikes", "strike", "attack", "attacks", "bomb", "missile", "nuclear strike",
     #地缘政治占领/封锁类
-     "capture", "invade", "invasion", "Strait of Hormuz","aliens","Iran","Iranian","Israel","Oil",
+     "capture", "invade", "invasion", "Strait of Hormuz","aliens",
     # 政治演讲单日事件
      "State of the Union", 'say "', "tweets", "tweet",
 ]
@@ -46,7 +46,9 @@ QUESTION_HARD_BLACKLIST = [
 ]
 
 DEPTH_THRESHOLD_TIER1   = 1500.0   # 第1档深度阈值（USDC），提高门槛确保只有深厚市场才挂第一档
-DEPTH_THRESHOLD_TIER2   = 200.0    # 第2、3档深度阈值（USDC）
+DEPTH_THRESHOLD_TIER2   = 500.0    # 第2、3档深度阈值（USDC）
+MIN_TOTAL_DEPTH_5LEVELS = 5000.0   # 前5档累计深度最低门槛（USDC），低于此值整个市场跳过
+FORCE_SKIP_TIER1        = False    # 全局强制跳过第一档，所有市场从第二档开始挂（第一档当前墙保护）
 EXTREME_PRICE_THRESHOLD = 0.10     # 极端价格阈值（<0.10 或 >0.90 必须双向挂单）
 RETRY_INTERVAL          = 300      # 深度不足重试间隔（秒，5分钟）
 DEFENSE_RETRY_INTERVAL  = 60       # 防御撤单后快速重试间隔（秒，1分钟）
@@ -82,7 +84,7 @@ SPREAD_CHECK_INTERVAL   = 60       # 插队检测间隔（秒）
 # ======================================================
 # ⚙️ 监控防御配置
 # ======================================================
-THRESHOLD_FRONT_DEPTH_DROP      = 0.20   # 前墙单轮跌幅触发阈值（原0.20太敏感，正常波动就20-30%）
+THRESHOLD_FRONT_DEPTH_DROP      = 0.20   # 前墙单轮跌幅触发阈值
 THRESHOLD_SAME_DEPTH_DROP       = 0.10   # 同档(别人的)单轮跌幅触发阈值
 THRESHOLD_FRONT_HIGH_WATER_DROP = 0.50   # 前墙高水位跌幅触发阈值（原0.50稍敏感）
 THRESHOLD_SAME_HIGH_WATER_DROP  = 0.50   # 同档高水位跌幅触发阈值
@@ -143,6 +145,9 @@ placed_orders_log_lock = threading.Lock()
 MAX_PLACED_ORDERS_LOG = 500  # 最多保留最近 500 条挂单日志，防止内存泄漏
 pending_retry_tokens: List[Dict] = []
 pending_retry_lock = threading.Lock()
+# 清仓锁：正在清仓的 token 不允许被重试队列重挂（防止"边清边买"死循环）
+closing_tokens: set = set()
+closing_tokens_lock = threading.Lock()
 
 
 # ======================================================
@@ -503,6 +508,11 @@ def analyze_best_place_price_from_book(book, side: str,
         if first_depth < 100.0:
             return None
 
+        # 前5档累计深度检查：市场太薄（几千刀就打穿）则整体跳过
+        top5_total_depth = sum(float(lv.price) * float(lv.size) for lv in levels[:5])
+        if top5_total_depth < MIN_TOTAL_DEPTH_5LEVELS:
+            return None
+
         # ── 档位连续性检查（方案A：前三档任意相邻间距 > 1c 则跳过）──────────
         top3_prices = [float(lv.price) for lv in levels[:3]]
         if len(top3_prices) >= 2:
@@ -648,6 +658,14 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
         "order_size": None,
     }
 
+    # 🔒 清仓锁检查：正在清仓的 token 不允许重挂（防止"边清边买"死循环）
+    with closing_tokens_lock:
+        if token_id in closing_tokens:
+            result["buy_status"] = "closing_locked"
+            result["sell_status"] = "closing_locked"
+            result["error"] = "正在清仓中，跳过重挂"
+            return result
+
     try:
         # 只调用一次订单簿 API，同时用于 mid price 计算和买卖档位分析
         book, best_bid, best_ask, mid = get_orderbook_info(poly_client, token_id)
@@ -681,8 +699,9 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
         # 复用同一个 book 对象分析买卖最优档位（不再重复请求 API）
         # 🚫 黑名单市场跳过第一档，从第二档开始挂单
         blacklisted = token_info.get("blacklisted", False)
-        buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=blacklisted)
-        sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=blacklisted)
+        skip_t1 = blacklisted or FORCE_SKIP_TIER1
+        buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=skip_t1)
+        sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=skip_t1)
 
         if extreme:
             # 极端价格市场：必须买卖双向都满足深度条件，否则整个跳过
@@ -1170,7 +1189,7 @@ async def auto_close_positions_task(strategy_tokens: list):
     token_map: Dict[str, Dict] = {}
     # 清仓失败冷却：token_id → 下次可重试的时间戳（避免 404 等错误无限刷屏）
     close_fail_cooldown: Dict[str, float] = {}
-    CLOSE_FAIL_COOLDOWN_SECONDS = 300  # 清仓失败后冷却 5 分钟再重试
+    CLOSE_FAIL_COOLDOWN_SECONDS = 30  # 清仓失败后冷却 30 秒再重试（止损不能等太久）
     # 清仓升级计数器：连续多轮都有持仓 → 说明清仓单没成交 → 用更激进价格
     close_attempt_count: Dict[str, int] = {}
 
@@ -1247,6 +1266,10 @@ async def auto_close_positions_task(strategy_tokens: list):
                 if now_ts < cooldown_until:
                     continue  # 仍在冷却中，静默跳过
 
+                # 🔒 加入清仓锁，阻止重试队列在清仓期间重挂该 token
+                with closing_tokens_lock:
+                    closing_tokens.add(token_id)
+
                 print(f"\n   🎯 [{token_type}] {question[:40]}...")
                 print(f"      持仓: {shares:.2f} shares")
 
@@ -1308,6 +1331,10 @@ async def auto_close_positions_task(strategy_tokens: list):
                 except Exception as e:
                     print(f"      ❌ 清仓出错: {e}")
                     close_fail_cooldown[token_id] = time.time() + CLOSE_FAIL_COOLDOWN_SECONDS
+                finally:
+                    # 🔓 释放清仓锁
+                    with closing_tokens_lock:
+                        closing_tokens.discard(token_id)
 
             print(f"{'$'*60}\n")
 
