@@ -4,8 +4,8 @@ import time
 import traceback
 import signal
 import sys
+import atexit
 import concurrent.futures
-import heapq
 from typing import List, Dict, Optional, Tuple
 from collections import defaultdict, deque
 from datetime import datetime
@@ -45,7 +45,7 @@ QUESTION_HARD_BLACKLIST = [
     # 在这里添加你想完全屏蔽的关键词，每个一行，例如：
     "NFL",
     "Iran","Iranian","Israel","Oil","March", "Winner", "Champion", "NBA", "Presidential", "Leader", "Nominee", "Supreme", "Bitcoin", "Democratic", "Trump", "Elon",
-    "Gold", "Mojtaba","Lakers",
+    "Gold", "Mojtaba",
 ]
 
 DEPTH_THRESHOLD_TIER1   = 1500.0   # 第1档深度阈值（USDC），提高门槛确保只有深厚市场才挂第一档
@@ -61,13 +61,13 @@ ENABLE_AUTO_PLACE       = True     # 是否启用自动挂单
 # 动态挂单量配置（分策略）
 # Normal LP：稳健策略，占比大、挂单量高
 NORMAL_SIZE_RATIO       = 0.30     # Normal LP 占前三档总深度 30%
-NORMAL_MAX_ORDER_SIZE   = 1500.0    # Normal LP 最大 1500 shares
+NORMAL_MAX_ORDER_SIZE   = 800.0    # Normal LP 最大 800 shares
 # High Reward：激进策略，占比小、挂单量低
 AGGRESSIVE_SIZE_RATIO   = 0.08     # High Reward 占前三档总深度 8%
 AGGRESSIVE_MAX_ORDER_SIZE = 300.0  # High Reward 最大 300 shares
 # Chain Rewards：链上自动发现的高奖励市场
 CHAIN_REWARDS_SIZE_RATIO     = 0.10     # Chain Rewards 占前三档总深度 10%
-CHAIN_REWARDS_MAX_ORDER_SIZE = 1000.0    # Chain Rewards 最大 1000 shares
+CHAIN_REWARDS_MAX_ORDER_SIZE = 500.0    # Chain Rewards 最大 500 shares
 # 兼容旧代码的默认值
 DYNAMIC_SIZE_RATIO      = 0.10     # 默认（手动挂单等）
 MAX_ORDER_SIZE          = 500.0    # 默认上限
@@ -83,11 +83,6 @@ CLOSE_PRICE_OFFSET_URGENT = 0.03     # 紧急清仓偏移（连续失败/极端�
 # ⚙️ 插队检测配置
 # ======================================================
 SPREAD_CHECK_INTERVAL   = 60       # 插队检测间隔（秒）
-
-# ⚙️ Q score 无效挂单阈值（集成在插队检测中）
-MIN_Q_SCORE_RATIO           = 0.04    # ((v-s)/v)^2 < 0.04 即 spread > 80% of max_spread → 奖励≈0，白担风险
-# 预计算：spread > max_spread * 0.8 时 Q score < 0.04，用于热路径快速判断
-MAX_INEFFECTIVE_SPREAD_FRAC = 1.0 - MIN_Q_SCORE_RATIO ** 0.5  # = 0.8
 
 # ======================================================
 # ⚙️ 监控防御配置
@@ -134,9 +129,20 @@ IMBALANCE_DEPTH_LEVELS          = 5          # 计算偏斜时使用前 N 档深
 IMBALANCE_MIN_TOTAL_DEPTH       = 500.0      # 买卖总深度低于此值时不检测（避免小市场误触发）
 
 # ======================================================
+# ⚙️ Kappa（盘口陡峭度）配置 —— 来自 YaelC_03 的盘口微结构自适应思路
+# ======================================================
+KAPPA_LEVELS              = 5        # 计算 kappa 使用的档位数量
+KAPPA_HIGH_THRESHOLD      = 4.0      # kappa >= 此值视为陡峭（薄盘口）→ 远离 mid 挂单
+KAPPA_LOW_THRESHOLD       = 0.8      # kappa <= 此值视为平坦（厚盘口）→ 靠近 mid 挂单
+KAPPA_SIZE_DISCOUNT_MAX   = 0.50     # 高 kappa 时最大挂单量折扣（减少 50%）
+KAPPA_SIZE_BOOST_MAX      = 1.20     # 低 kappa 时最大挂单量加成（增加 20%）
+KAPPA_SPIKE_THRESHOLD     = 2.0      # kappa 单轮涨幅超过此值触发防御警报
+ENABLE_KAPPA_ADJUSTMENT   = True     # 总开关：False 则 kappa 仅记录不影响决策（影子模式）
+
+# ======================================================
 # 🔥 FastAPI Dashboard
 # ======================================================
-app = FastAPI(title="Poly-Maker Dashboard")
+app = FastAPI(title="Poly-Maker Dashboard (Kappa Edition)")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -148,9 +154,9 @@ app.add_middleware(
 # ======================================================
 # 📊 全局状态
 # ======================================================
-MAX_PLACED_ORDERS_LOG = 500  # 最多保留最近 500 条挂单日志，防止内存泄漏
-placed_orders_log: deque = deque(maxlen=MAX_PLACED_ORDERS_LOG)
+placed_orders_log: List[Dict] = []
 placed_orders_log_lock = threading.Lock()
+MAX_PLACED_ORDERS_LOG = 500  # 最多保留最近 500 条挂单日志，防止内存泄漏
 pending_retry_tokens: List[Dict] = []
 pending_retry_lock = threading.Lock()
 # 清仓锁：正在清仓的 token 不允许被重试队列重挂（防止"边清边买"死循环）
@@ -225,38 +231,30 @@ def cancel_all_orders_now(poly_client: PolymarketClient, reason: str = "手动�
         return
 
     try:
-        # ====== 第一步：全局撤单（最可靠，一次性撤掉账户所有挂单） ======
-        print("🔥 正在执行【全局撤单】(cancel_all)...")
-        cancel_all_ok = False
-        try:
-            resp = poly_client.client.cancel_all()
-            print(f"✅ 全局撤单指令已发送! Response: {resp}")
-            cancel_all_ok = True
-        except Exception as e:
-            print(f"⚠️ 全局撤单失败: {e}，将逐 token 补撤...")
-
-        # ====== 第二步：仅在全局撤单失败时逐 token 补撤 ======
-        if not cancel_all_ok:
-            tokens_to_cancel = []
-            if hasattr(global_state, 'all_tokens') and global_state.all_tokens:
-                tokens_to_cancel = list(global_state.all_tokens)
-            else:
-                if hasattr(global_state, 'df') and global_state.df is not None and not global_state.df.empty:
-                    if 'token1' in global_state.df.columns:
-                        tokens_to_cancel.extend(global_state.df['token1'].dropna().astype(str).tolist())
-                    if 'token2' in global_state.df.columns:
-                        tokens_to_cancel.extend(global_state.df['token2'].dropna().astype(str).tolist())
-                tokens_to_cancel = list(set(tokens_to_cancel))
-            if tokens_to_cancel:
-                print(f"📋 逐 token 补撤兜底，共 {len(tokens_to_cancel)} 个...")
-                count = 0
-                for token in tokens_to_cancel:
-                    try:
-                        poly_client.cancel_all_asset(token)
-                        count += 1
-                    except Exception as te:
-                        print(f"   ❌ 撤单失败 {token[:10]}: {te}")
-                print(f"✅ 逐 token 撤单完成！已处理 {count}/{len(tokens_to_cancel)} 个 token。")
+        tokens_to_cancel = []
+        # 优先用 all_tokens（运行时一定有值），再回退到 df
+        if hasattr(global_state, 'all_tokens') and global_state.all_tokens:
+            tokens_to_cancel = list(global_state.all_tokens)
+        else:
+            if hasattr(global_state, 'df') and global_state.df is not None and not global_state.df.empty:
+                if 'token1' in global_state.df.columns:
+                    tokens_to_cancel.extend(global_state.df['token1'].dropna().astype(str).tolist())
+                if 'token2' in global_state.df.columns:
+                    tokens_to_cancel.extend(global_state.df['token2'].dropna().astype(str).tolist())
+        tokens_to_cancel = list(set(tokens_to_cancel))
+        if not tokens_to_cancel:
+            print("⚠️ 没有可撤单的 token 列表（表格为空）。")
+            print("=" * 50 + "\n")
+            return
+        print(f"📋 仅撤销表格内的 token，共 {len(tokens_to_cancel)} 个（不影响手动挂单）...")
+        count = 0
+        for token in tokens_to_cancel:
+            try:
+                poly_client.cancel_all_asset(token)
+                count += 1
+            except Exception as te:
+                print(f"   ❌ 撤单失败 {token[:10]}: {te}")
+        print(f"✅ 撤单完成！已处理 {count}/{len(tokens_to_cancel)} 个 token。")
     except Exception as e:
         print(f"❌ 撤单失败: {e}")
         traceback.print_exc()
@@ -283,7 +281,6 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
     min_size_col   = find_col(df, 'min_size')
     neg_risk_col   = find_col(df, 'neg_risk')
     max_spread_col = find_col(df, 'max_spread')
-    vol_col        = find_col(df, 'volatility_sum')
 
     added = 0
     skipped_blacklist = 0
@@ -338,6 +335,7 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
 
         # volatility_sum（用于波动率加权挂单量）
         vol_sum = 0.0
+        vol_col = find_col(df, 'volatility_sum')
         if vol_col:
             try:
                 vol_sum = float(str(row.get(vol_col, 0)).replace(',', ''))
@@ -457,46 +455,97 @@ def load_strategy_markets() -> List[Dict]:
 # ======================================================
 def get_orderbook_info(poly_client: PolymarketClient, token_id: str):
     """
-    获取订单簿，返回 (book, best_bid, best_ask, mid_price, sorted_bids, sorted_asks)
-    sorted_bids: 按价格降序，sorted_asks: 按价格升序
+    获取订单簿，返回 (book, best_bid, best_ask, mid_price) 或 None
     """
     try:
         book = poly_client.client.get_order_book(token_id)
         if not book:
-            return None, None, None, None, [], []
-        sorted_bids = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
-        sorted_asks = sorted(book.asks, key=lambda x: float(x.price), reverse=False)
-        best_bid = float(sorted_bids[0].price) if sorted_bids else None
-        best_ask = float(sorted_asks[0].price) if sorted_asks else None
+            return None, None, None, None
+        bids = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
+        asks = sorted(book.asks, key=lambda x: float(x.price), reverse=False)
+        best_bid = float(bids[0].price) if bids else None
+        best_ask = float(asks[0].price) if asks else None
         if best_bid is not None and best_ask is not None:
             mid = (best_bid + best_ask) / 2.0
         else:
             mid = None
-        return book, best_bid, best_ask, mid, sorted_bids, sorted_asks
+        return book, best_bid, best_ask, mid
     except Exception as e:
-        return None, None, None, None, [], []
+        return None, None, None, None
+
+
+# ======================================================
+# 📐 Kappa（盘口陡峭度）计算
+# ======================================================
+def calculate_kappa(book, side: str, levels: int = KAPPA_LEVELS) -> Optional[float]:
+    """
+    计算订单簿陡峭度 kappa。
+    kappa = tier1_depth / avg(tier2..tierN_depth)
+    高 kappa → 盘口陡峭（深度集中在第一档，后面几档很薄）→ 应远离挂单
+    低 kappa → 盘口平坦（深度均匀分布）→ 可以靠近挂单
+    返回 None 表示数据不足。
+    """
+    if not book:
+        return None
+
+    if side == "BUY":
+        raw_levels = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
+    else:
+        raw_levels = sorted(book.asks, key=lambda x: float(x.price), reverse=False)
+
+    if len(raw_levels) < 2:
+        return None
+
+    depths = []
+    for lv in raw_levels[:levels]:
+        p = float(lv.price)
+        s = float(lv.size)
+        depths.append(p * s)
+
+    tier1_depth = depths[0]
+    remaining = [d for d in depths[1:] if d > 0]
+    if not remaining:
+        return 10.0  # 第一档有深度但后面全空 → 极度陡峭
+
+    remaining_avg = sum(remaining) / len(remaining)
+    if remaining_avg <= 0:
+        return 10.0
+
+    kappa = tier1_depth / remaining_avg
+    return round(kappa, 3)
+
+
+def kappa_depth_factor(kappa: Optional[float]) -> float:
+    """
+    根据 kappa 返回缩放因子，用于调整深度阈值和挂单量。
+    kappa 高（陡峭）→ 因子 > 1.0（提高深度门槛 / 缩小挂单量）
+    kappa 低（平坦）→ 因子 < 1.0（降低深度门槛 / 允许更大挂单量）
+    kappa 在 [LOW, HIGH] 之间 → 线性插值
+    """
+    if kappa is None or not ENABLE_KAPPA_ADJUSTMENT:
+        return 1.0
+
+    if kappa >= KAPPA_HIGH_THRESHOLD:
+        # 陡峭盘口：提高门槛，最多 1.0 + KAPPA_SIZE_DISCOUNT_MAX = 1.5
+        return 1.0 + KAPPA_SIZE_DISCOUNT_MAX
+    elif kappa <= KAPPA_LOW_THRESHOLD:
+        # 平坦盘口：降低门槛，最低 1.0 / KAPPA_SIZE_BOOST_MAX ≈ 0.83
+        return 1.0 / KAPPA_SIZE_BOOST_MAX
+    else:
+        # 线性插值：LOW→1/BOOST, MID→1.0, HIGH→1+DISCOUNT
+        mid_kappa = (KAPPA_LOW_THRESHOLD + KAPPA_HIGH_THRESHOLD) / 2.0
+        if kappa <= mid_kappa:
+            # LOW..MID → [1/BOOST, 1.0]
+            t = (kappa - KAPPA_LOW_THRESHOLD) / (mid_kappa - KAPPA_LOW_THRESHOLD)
+            return (1.0 / KAPPA_SIZE_BOOST_MAX) + t * (1.0 - 1.0 / KAPPA_SIZE_BOOST_MAX)
+        else:
+            # MID..HIGH → [1.0, 1+DISCOUNT]
+            t = (kappa - mid_kappa) / (KAPPA_HIGH_THRESHOLD - mid_kappa)
+            return 1.0 + t * KAPPA_SIZE_DISCOUNT_MAX
 
 
 # 档位连续性检查阈值（相邻档位价差超过此值则认为流动性不连续）
 MAX_LEVEL_GAP = 0.02  # 2c（Normal LP 市场 spread 2-6c，档位间距 2c 是正常的）
-
-
-# ======================================================
-# 🚫 Q score 有效性计算（无效挂单检测用）
-# ======================================================
-def calculate_q_score_ratio(spread: float, max_spread: float) -> float:
-    """
-    计算单个挂单的 Q score 权重比：((v - s) / v)^2
-    - spread: 挂单价格距离 mid 的距离（绝对值）
-    - max_spread: 市场的 max_incentive_spread
-    返回 0~1 之间的值，越接近 0 说明挂单越接近 max_spread 边界，奖励越低
-    """
-    if max_spread <= 0:
-        return 0.0
-    if spread >= max_spread:
-        return 0.0  # 超出范围，Q = 0
-    ratio = (max_spread - spread) / max_spread
-    return ratio * ratio  # 二次方衰减
 
 
 def analyze_best_place_price_from_book(book, side: str,
@@ -504,19 +553,24 @@ def analyze_best_place_price_from_book(book, side: str,
                                         mid: Optional[float] = None,
                                         order_size: Optional[float] = None,
                                         skip_tier1: bool = False,
-                                        sorted_levels=None):
+                                        kappa: Optional[float] = None):
     """
     从已有的订单簿对象分析最优挂单价格（不再重复请求 API）。
-    - sorted_levels: 预排序的档位列表（可选，避免重复排序）
+    - 第1档需要深度 >= DEPTH_THRESHOLD_TIER1（由 kappa 动态缩放）
+    - 第2、3档需要深度 >= DEPTH_THRESHOLD_TIER2（由 kappa 动态缩放）
+    - kappa 高（盘口陡峭）→ 提高深度门槛 → 自然跳到 tier 2/3（远离 mid）
+    - kappa 低（盘口平坦）→ 降低深度门槛 → 更容易挂 tier 1（靠近 mid）
+    - 如果提供了 max_spread 和 mid，则只选择在 [mid-max_spread, mid+max_spread] 范围内的档位
+    - 前三档任意相邻档位价差 > MAX_LEVEL_GAP (2c) 则跳过（流动性不连续，被吃损失过大）
+    - 如果提供了 order_size，第1档额外检查：挂单价值不超过该档深度的 20%，否则跳到第2档
+    - skip_tier1: 黑名单市场强制跳过第一档，从第二档开始挂单
     返回 (price, tier, depth) 或 None
     """
     try:
         if not book:
             return None
 
-        if sorted_levels is not None:
-            levels = sorted_levels
-        elif side == "BUY":
+        if side == "BUY":
             levels = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
         else:
             levels = sorted(book.asks, key=lambda x: float(x.price), reverse=False)
@@ -544,6 +598,11 @@ def analyze_best_place_price_from_book(book, side: str,
                     # 流动性不连续，跳过
                     return None
 
+        # 📐 kappa 自适应：陡峭盘口提高深度门槛（跳到远档），平坦盘口降低门槛（靠近挂单）
+        kf = kappa_depth_factor(kappa)
+        adj_threshold_tier1 = max(DEPTH_THRESHOLD_TIER2 * 0.5, min(DEPTH_THRESHOLD_TIER1 * 3.0, DEPTH_THRESHOLD_TIER1 * kf))
+        adj_threshold_tier2 = max(DEPTH_THRESHOLD_TIER2 * 0.5, min(DEPTH_THRESHOLD_TIER2 * 3.0, DEPTH_THRESHOLD_TIER2 * kf))
+
         for i, level in enumerate(levels[:3]):
             # 🚫 黑名单市场强制跳过第一档
             if i == 0 and skip_tier1:
@@ -552,7 +611,7 @@ def analyze_best_place_price_from_book(book, side: str,
             price = float(level.price)
             size = float(level.size)
             depth = price * size
-            threshold = DEPTH_THRESHOLD_TIER1 if i == 0 else DEPTH_THRESHOLD_TIER2
+            threshold = adj_threshold_tier1 if i == 0 else adj_threshold_tier2
 
             if depth < threshold:
                 continue
@@ -578,10 +637,6 @@ def analyze_best_place_price_from_book(book, side: str,
                 if not (lower <= price <= upper):
                     continue  # 此档位超出范围，跳过
 
-                # Q score 过低则跳过（避免挂在 max_spread 边界附近，奖励 ≈ 0）
-                if abs(price - mid) > max_spread * MAX_INEFFECTIVE_SPREAD_FRAC:
-                    continue
-
             return price, i + 1, depth
 
         return None
@@ -601,29 +656,36 @@ def calculate_dynamic_size(book, mid: Optional[float], min_size: float,
                            volatility_sum: float = 0.0,
                            size_ratio: float = DYNAMIC_SIZE_RATIO,
                            max_order_size: float = MAX_ORDER_SIZE,
-                           sorted_bids=None, sorted_asks=None) -> Optional[float]:
+                           kappa: Optional[float] = None) -> Optional[float]:
     """
     根据市场前三档深度和波动率动态计算挂单量。
-    sorted_bids/sorted_asks: 预排序列表（可选，避免重复排序）
-    返回 None 表示深度不足，应跳过该市场。
+
+    逻辑：
+      1. 分别计算买单前三档深度和卖单前三档深度（USDC）
+      2. 分别计算对应方向的目标挂单量（shares）
+      3. 取两者中的较小值，确保任何一个方向都不会占比过大
+      4. 应用波动率折扣因子：高波动市场挂小单，低波动市场挂大单
+      5. 如果 target_size < min_size（奖励门槛），返回 None（深度不足，跳过不挂）
+      6. 否则返回 min(target_size, MAX_ORDER_SIZE)，取整
+
+    波动率折扣因子：
+      volatility_sum <= 10  → factor = 1.0（满额挂单）
+      volatility_sum = 25   → factor = 0.75
+      volatility_sum = 50   → factor = 0.33（大幅缩减）
+
+    返回 None 表示深度不足以支撑最小奖励挂单量，应跳过该市场。
     """
     if not book or mid is None or mid <= 0:
         return None
 
     try:
         # 买单前三档深度（USDC）
-        if sorted_bids is not None:
-            top3_bids = sorted_bids[:3]
-        else:
-            top3_bids = heapq.nlargest(3, book.bids, key=lambda x: float(x.price))
-        top3_bid_depth = sum(float(b.price) * float(b.size) for b in top3_bids)
+        bids = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
+        top3_bid_depth = sum(float(b.price) * float(b.size) for b in bids[:3])
 
         # 卖单前三档深度（USDC）
-        if sorted_asks is not None:
-            top3_asks = sorted_asks[:3]
-        else:
-            top3_asks = heapq.nsmallest(3, book.asks, key=lambda x: float(x.price))
-        top3_ask_depth = sum(float(a.price) * float(a.size) for a in top3_asks)
+        asks = sorted(book.asks, key=lambda x: float(x.price), reverse=False)
+        top3_ask_depth = sum(float(a.price) * float(a.size) for a in asks[:3])
 
         if top3_bid_depth <= 0 and top3_ask_depth <= 0:
             return None
@@ -641,6 +703,14 @@ def calculate_dynamic_size(book, mid: Optional[float], min_size: float,
         else:
             vol_factor = max(0.2, 1.0 - (volatility_sum - 10) / 60)
         target_size = target_size * vol_factor
+
+        # 📐 kappa 自适应：陡峭盘口挂小单（减少暴露），平坦盘口可挂大单
+        if kappa is not None and ENABLE_KAPPA_ADJUSTMENT:
+            kf = kappa_depth_factor(kappa)
+            # kf > 1 时缩小挂单量，kf < 1 时放大挂单量
+            target_size = target_size / kf
+            # 兜底：防止 kappa + 波动率双重折扣把量杀太狠
+            target_size = max(target_size, min_size * 0.8)
 
         # 如果 target_size < min_size（奖励门槛），说明深度不足以支撑最小奖励挂单量，跳过
         if target_size < min_size:
@@ -688,10 +758,16 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
 
     try:
         # 只调用一次订单簿 API，同时用于 mid price 计算和买卖档位分析
-        book, best_bid, best_ask, mid, sorted_bids, sorted_asks = get_orderbook_info(poly_client, token_id)
+        book, best_bid, best_ask, mid = get_orderbook_info(poly_client, token_id)
         result["mid"] = mid
 
-        # 🔥 动态计算挂单量（基于前三档总深度 + 波动率加权）
+        # 📐 计算盘口陡峭度 kappa（买卖两侧取较高值 = 更保守）
+        kappa_bid = calculate_kappa(book, "BUY")
+        kappa_ask = calculate_kappa(book, "SELL")
+        kappa = max(kappa_bid or 0, kappa_ask or 0) if (kappa_bid or kappa_ask) else None
+        result["kappa"] = kappa
+
+        # 🔥 动态计算挂单量（基于前三档总深度 + 波动率加权 + kappa 自适应）
         # 根据策略来源使用不同的占比和上限
         source = token_info.get("source", "Normal LP")
         vol_sum = token_info.get("volatility_sum", 0.0)
@@ -704,8 +780,7 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
         else:
             sr, mos = DYNAMIC_SIZE_RATIO, MAX_ORDER_SIZE
         order_size = calculate_dynamic_size(book, mid, base_min_size, volatility_sum=vol_sum,
-                                            size_ratio=sr, max_order_size=mos,
-                                            sorted_bids=sorted_bids, sorted_asks=sorted_asks)
+                                            size_ratio=sr, max_order_size=mos, kappa=kappa)
         result["order_size"] = order_size
         if order_size is None:
             result["buy_status"] = "depth_insufficient"
@@ -721,8 +796,8 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
         # 🚫 黑名单市场跳过第一档，从第二档开始挂单
         blacklisted = token_info.get("blacklisted", False)
         skip_t1 = blacklisted or FORCE_SKIP_TIER1
-        buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_bids)
-        sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_asks)
+        buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=skip_t1, kappa=kappa)
+        sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=skip_t1, kappa=kappa)
 
         if extreme:
             # 极端价格市场：必须买卖双向都满足深度条件，否则整个跳过
@@ -885,7 +960,7 @@ def _cleanup_blacklisted_orders(poly_client: PolymarketClient):
 
 
 def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
-    global pending_retry_tokens
+    global placed_orders_log, pending_retry_tokens
 
     poly_client = global_state.client
     if not poly_client:
@@ -941,6 +1016,8 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
         result = results_map.get(token_info["token_id"], {})
         with placed_orders_log_lock:
             placed_orders_log.append(result)
+            if len(placed_orders_log) > MAX_PLACED_ORDERS_LOG:
+                placed_orders_log[:] = placed_orders_log[-MAX_PLACED_ORDERS_LOG:]
 
         buy_ok    = result.get("buy_status") == "placed"
         sell_ok   = result.get("sell_status") == "placed"
@@ -958,7 +1035,8 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
             sell_info = f"卖{result['sell_tier']}(${result['sell_price']:.3f})" if sell_ok else "卖单跳过"
             extreme_tag = " [极端价格✓]" if result.get("extreme_price") else ""
             spread_tag  = f" [mid={result['mid']:.3f}±{result['max_spread']}]" if result.get("max_spread") and result.get("mid") else ""
-            print(f"{label} ✅ {buy_info} | {sell_info}{extreme_tag}{spread_tag}")
+            kappa_tag   = f" [κ={result['kappa']:.2f}]" if result.get("kappa") is not None else ""
+            print(f"{label} ✅ {buy_info} | {sell_info}{extreme_tag}{spread_tag}{kappa_tag}")
         elif result.get("error") and "极端价格" in str(result.get("error", "")):
             skip_count += 1
             print(f"{label} ⛔ {result['error']}")
@@ -978,6 +1056,24 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
         kept = [t for t in pending_retry_tokens if t["token_id"] not in retried_ids]
         # 合并：本次重试仍失败的 + 其他保留的
         pending_retry_tokens[:] = new_pending + kept
+
+    # 📐 κ 汇总表：一眼看到所有市场的盘口陡峭度
+    kappa_rows = []
+    for token_info in strategy_tokens:
+        r = results_map.get(token_info["token_id"], {})
+        k = r.get("kappa")
+        if k is not None:
+            kf = kappa_depth_factor(k)
+            status = "陡峭↑" if k >= KAPPA_HIGH_THRESHOLD else ("平坦↓" if k <= KAPPA_LOW_THRESHOLD else "正常")
+            kappa_rows.append((token_info["question"][:30], k, kf, status))
+
+    if kappa_rows:
+        mode = "自适应" if ENABLE_KAPPA_ADJUSTMENT else "影子模式"
+        print(f"\n📐 κ 汇总 ({mode}) ─────────────────────────────")
+        for name, k, kf, status in kappa_rows:
+            bar = "█" * min(int(k), 15)
+            print(f"   {name:<30s} │ κ={k:>5.2f} {bar:<15s} │ factor={kf:.2f} │ {status}")
+        print(f"   {'─'*75}")
 
     print(f"\n{'='*60}")
     print(f"📊 [自动挂单] 完成！成功: {success_count} 个，跳过/失败: {skip_count} 个")
@@ -1100,7 +1196,7 @@ def check_and_rebalance_token(poly_client: PolymarketClient, token_info: Dict,
         return False  # 没有挂单，跳过
 
     # 只调用一次订单簿 API，同时用于 mid price 计算和重新挂单分析
-    book, best_bid, best_ask, mid, _, _ = get_orderbook_info(poly_client, token_id)
+    book, best_bid, best_ask, mid = get_orderbook_info(poly_client, token_id)
     if mid is None:
         return False
 
@@ -1110,40 +1206,8 @@ def check_and_rebalance_token(poly_client: PolymarketClient, token_info: Dict,
     bid_out_of_range  = my_bid_price  is not None and not (lower <= my_bid_price  <= upper)
     ask_out_of_range  = my_ask_price  is not None and not (lower <= my_ask_price  <= upper)
 
-    # Q score 无效检测：在范围内但 Q score 过低（接近 max_spread 边界，奖励 ≈ 0）
-    bid_q_ineffective = False
-    ask_q_ineffective = False
-    bid_q = 0.0
-    ask_q = 0.0
-    if not bid_out_of_range and my_bid_price is not None:
-        bid_q = calculate_q_score_ratio(abs(my_bid_price - mid), max_spread)
-        bid_q_ineffective = bid_q < MIN_Q_SCORE_RATIO
-    if not ask_out_of_range and my_ask_price is not None:
-        ask_q = calculate_q_score_ratio(abs(my_ask_price - mid), max_spread)
-        ask_q_ineffective = ask_q < MIN_Q_SCORE_RATIO
-
-    # 无效挂单：Q score 过低，只撤单不重挂（重挂也会挂到同样无效的位置）
-    if bid_q_ineffective or ask_q_ineffective:
-        q_sides = []
-        if bid_q_ineffective:  q_sides.append(f"买单({my_bid_price:.3f}, Q={bid_q:.4f})")
-        if ask_q_ineffective:  q_sides.append(f"卖单({my_ask_price:.3f}, Q={ask_q:.4f})")
-        print(f"\n🚫 [Q score过低] [{token_type}] {question[:35]}...")
-        print(f"   mid={mid:.3f}, max_spread={max_spread:.4f}")
-        print(f"   {', '.join(q_sides)} → 白担风险，撤单")
-        try:
-            if bid_q_ineffective and ask_q_ineffective:
-                poly_client.cancel_all_asset(token_id)
-            elif bid_q_ineffective:
-                cancel_one_side_orders(poly_client, token_id, "BUY", question)
-            else:
-                cancel_one_side_orders(poly_client, token_id, "SELL", question)
-            return True
-        except Exception as e:
-            print(f"   ❌ Q score 撤单失败: {e}")
-            return False
-
     if not bid_out_of_range and not ask_out_of_range:
-        return False  # 都在范围内且 Q score 足够，无需操作
+        return False  # 都在范围内，无需操作
 
     # 有挂单偏离范围，撤单重挂
     out_sides = []
@@ -1198,33 +1262,26 @@ async def spread_check_task(strategy_tokens: list):
                 await asyncio.sleep(SPREAD_CHECK_INTERVAL)
                 continue
 
-            # 批量获取我的挂单（TTL=5s，60s 轮询不需要亚秒新鲜度）
-            all_orders = await asyncio.to_thread(get_all_my_orders_cached, poly_client, 5.0)
+            # 批量获取我的挂单
+            all_orders = await asyncio.to_thread(get_all_my_orders_once, poly_client)
 
-            # 过滤出有挂单的 token，并发检查
-            active = [(t, *all_orders.get(t["token_id"], (None, None)))
-                      for t in spread_tokens]
-            active = [(t, bp, ap) for t, bp, ap in active
-                      if bp is not None or ap is not None]
-            matched = len(active)
+            rebalanced = 0
+            for t in spread_tokens:
+                token_id = t["token_id"]
+                my_bid_price, my_ask_price = all_orders.get(token_id, (None, None))
 
-            if matched > 0:
-                sem = asyncio.Semaphore(5)
-                results = []
+                if my_bid_price is None and my_ask_price is None:
+                    continue  # 没有挂单，跳过
 
-                async def _check_one(t, bp, ap):
-                    async with sem:
-                        return await asyncio.to_thread(
-                            check_and_rebalance_token, poly_client, t, bp, ap
-                        )
-
-                results = await asyncio.gather(
-                    *[_check_one(t, bp, ap) for t, bp, ap in active]
+                did_rebalance = await asyncio.to_thread(
+                    check_and_rebalance_token, poly_client, t, my_bid_price, my_ask_price
                 )
-                rebalanced = sum(1 for r in results if r)
+                if did_rebalance:
+                    rebalanced += 1
+                    await asyncio.sleep(0.5)
 
-                ts = datetime.now().strftime('%H:%M:%S')
-                print(f"[{ts}] 🔍 [插队检测] spread_tokens={len(spread_tokens)}, API订单={len(all_orders)}, 匹配={matched}, 重挂={rebalanced}")
+            if rebalanced > 0:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 [插队检测] 本轮重新挂单: {rebalanced} 个")
 
         except Exception as e:
             print(f"\n❌ [插队检测] 运行时错误: {e}")
@@ -1426,6 +1483,8 @@ class MarketState:
         self.bid_same_history = deque(maxlen=TREND_WINDOW_SIZE)
         self.ask_front_history = deque(maxlen=TREND_WINDOW_SIZE)
         self.ask_same_history = deque(maxlen=TREND_WINDOW_SIZE)
+        # 📐 kappa 追踪（盘口陡峭度突变检测）
+        self.last_kappa = None
 
     def reset_high_water(self):
         self.bid_front_high_water = 0
@@ -1436,6 +1495,7 @@ class MarketState:
         self.bid_same_history.clear()
         self.ask_front_history.clear()
         self.ask_same_history.clear()
+        self.last_kappa = None
 
 
 def get_all_my_orders_once(poly_client: PolymarketClient):
@@ -1465,25 +1525,6 @@ def get_all_my_orders_once(poly_client: PolymarketClient):
     except Exception as e:
         print(f"⚠️ 批量获取订单失败: {e}")
         return {}
-
-
-# ── 订单缓存（避免 monitor_defense_loop 和 spread_check_task 重复调 API）──
-_orders_cache_lock = threading.Lock()
-_orders_cache_data: dict = {}
-_orders_cache_ts: float = 0.0
-
-def get_all_my_orders_cached(poly_client: PolymarketClient, ttl: float = 2.0) -> dict:
-    """带 TTL 缓存的 get_all_my_orders_once，线程安全"""
-    global _orders_cache_data, _orders_cache_ts
-    now = time.time()
-    with _orders_cache_lock:
-        if now - _orders_cache_ts < ttl:
-            return _orders_cache_data
-    fresh = get_all_my_orders_once(poly_client)
-    with _orders_cache_lock:
-        _orders_cache_data = fresh
-        _orders_cache_ts = time.time()
-    return fresh
 
 
 def get_order_book_safe_monitor(poly_client: PolymarketClient, token_id: str):
@@ -1744,7 +1785,7 @@ async def monitor_defense_loop(strategy_tokens: list):
                 if t["token_id"] not in market_states:
                     market_states[t["token_id"]] = MarketState(t["question"], t["token_type"])
 
-            all_orders = await asyncio.to_thread(get_all_my_orders_cached, poly_client, 2.0)
+            all_orders = await asyncio.to_thread(get_all_my_orders_once, poly_client)
 
             # 🔥 自动发现所有挂单（包括手动挂单），不限于 strategy_tokens 列表
             known_token_ids = {t["token_id"] for t in current_tokens}
@@ -1786,11 +1827,10 @@ async def monitor_defense_loop(strategy_tokens: list):
                 if not book:
                     continue
 
-                # 排序一次，后续复用
-                bids_sorted = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
-                asks_sorted = sorted(book.asks, key=lambda x: float(x.price), reverse=False)
-
                 # ── 极端价格孤单检测 ──────────────────────────────────
+                # 对于极端价格市场（YES < 10c 或 YES > 90c），必须双向挂单才有奖励。
+                # 如果只有一边挂单（孤立），立即撤掉，避免无效占用资金。
+                bids_sorted = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
                 best_bid_price = float(bids_sorted[0].price) if bids_sorted else None
                 if best_bid_price is not None and is_extreme_price_market(best_bid_price):
                     has_bid = my_bid_price is not None
@@ -1813,8 +1853,8 @@ async def monitor_defense_loop(strategy_tokens: list):
 
                 # ── ⚖️ 偏斜检测（买卖深度严重不对称时撤单）──────────────
                 if ENABLE_IMBALANCE_DETECTION and not state.first_run:
-                    bids_top = bids_sorted[:IMBALANCE_DEPTH_LEVELS]
-                    asks_top = asks_sorted[:IMBALANCE_DEPTH_LEVELS]
+                    bids_top = sorted(book.bids, key=lambda x: float(x.price), reverse=True)[:IMBALANCE_DEPTH_LEVELS]
+                    asks_top = sorted(book.asks, key=lambda x: float(x.price), reverse=False)[:IMBALANCE_DEPTH_LEVELS]
                     imb_bid_depth = sum(float(b.price) * float(b.size) for b in bids_top)
                     imb_ask_depth = sum(float(a.price) * float(a.size) for a in asks_top)
                     imb_total = imb_bid_depth + imb_ask_depth
@@ -1892,6 +1932,19 @@ async def monitor_defense_loop(strategy_tokens: list):
                 triggered = False
                 _is_ext = best_bid_price is not None and is_extreme_price_market(best_bid_price)
 
+                # 📐 kappa 突变检测：盘口急剧变薄时触发防御
+                kappa_bid = calculate_kappa(book, "BUY")
+                kappa_ask = calculate_kappa(book, "SELL")
+                current_kappa = max(kappa_bid or 0, kappa_ask or 0) if (kappa_bid or kappa_ask) else None
+                if current_kappa is not None and state.last_kappa is not None and not state.first_run:
+                    kappa_jump = current_kappa - state.last_kappa
+                    if kappa_jump >= KAPPA_SPIKE_THRESHOLD:
+                        trigger_reasons.append(
+                            f"🚨 [κ突变] 盘口急剧变陡！κ: {state.last_kappa:.2f}→{current_kappa:.2f} (+{kappa_jump:.2f})"
+                        )
+                        triggered = True
+                state.last_kappa = current_kappa
+
                 if not state.first_run:
                     bid_triggered, bid_reasons = check_bid_threats(state, my_bid_price, bid_front, bid_same, is_extreme=_is_ext)
                     ask_triggered, ask_reasons = check_ask_threats(state, my_ask_price, ask_front, ask_same, is_extreme=_is_ext)
@@ -1948,6 +2001,18 @@ async def monitor_defense_loop(strategy_tokens: list):
             else:
                 dynamic_interval = MONITOR_CHECK_INTERVAL * 3
             print(f"\r[ {timestamp} ] 🛡️ 扫描 #{scan_count} | 活跃: {active_count}/{len(current_tokens)} | 耗时: {loop_time:.2f}s | 间隔: {dynamic_interval}s", end="", flush=True)
+
+            # 📐 每10轮输出一次 κ 汇总
+            if scan_count % 10 == 0 and market_states:
+                kappa_items = [(s.question[:25], s.last_kappa) for s in market_states.values() if s.last_kappa is not None]
+                if kappa_items:
+                    mode = "自适应" if ENABLE_KAPPA_ADJUSTMENT else "影子"
+                    print(f"\n📐 κ 快照 #{scan_count} ({mode})")
+                    for name, k in sorted(kappa_items, key=lambda x: -x[1]):
+                        bar = "█" * min(int(k), 15)
+                        tag = "⚠陡" if k >= KAPPA_HIGH_THRESHOLD else ("↓平" if k <= KAPPA_LOW_THRESHOLD else "  ")
+                        print(f"   {name:<25s} │ κ={k:>5.2f} {bar:<10s} │ {tag}")
+                    print()
             sleep_time = max(0.1, dynamic_interval - loop_time)
             await asyncio.sleep(sleep_time)
 
@@ -1964,10 +2029,8 @@ async def monitor_defense_loop(strategy_tokens: list):
 # ======================================================
 @app.on_event("shutdown")
 async def shutdown_event():
-    if _shutdown_done:
-        return  # 已由 _graceful_shutdown 撤单，避免重复调用
     poly_client = getattr(global_state, 'client', None)
-    await asyncio.to_thread(cancel_all_orders_now, poly_client, "uvicorn 正常关闭")
+    await asyncio.to_thread(cancel_all_orders_now, poly_client, "程序关闭（Ctrl+C）")
 
 
 # ======================================================
@@ -2093,7 +2156,7 @@ async def auto_place_and_monitor():
         monitor_defense_loop(strategy_tokens),      # 监控防御
         sheet_sync_task(strategy_tokens),           # 每小时表格同步
         auto_close_positions_task(strategy_tokens), # 自动清仓
-        spread_check_task(strategy_tokens),         # 插队检测 + Q score 无效挂单检测
+        spread_check_task(strategy_tokens),         # 插队检测
     )
 
 
@@ -2111,18 +2174,12 @@ def start_background_thread():
     loop.run_until_complete(background_services())
 
 
-_shutdown_done = False
-
 def _graceful_shutdown(signum=None, frame=None):
-    """Ctrl+C / SIGTERM 时强制撤单"""
-    global _shutdown_done
-    if _shutdown_done:
-        return
-    _shutdown_done = True
+    """Ctrl+C 时强制撤单，不依赖 uvicorn shutdown 事件"""
     print("\n🛑 收到退出信号，正在撤单...")
     try:
         poly_client = getattr(global_state, 'client', None)
-        cancel_all_orders_now(poly_client, "程序关闭")
+        cancel_all_orders_now(poly_client, "程序关闭（Ctrl+C）")
     except Exception as e:
         print(f"❌ 退出撤单异常: {e}")
     print("👋 已退出。")
@@ -2130,11 +2187,19 @@ def _graceful_shutdown(signum=None, frame=None):
 
 
 if __name__ == "__main__":
+    # 注册信号处理，确保 Ctrl+C 能触发撤单
     signal.signal(signal.SIGINT, _graceful_shutdown)
     signal.signal(signal.SIGTERM, _graceful_shutdown)
+    atexit.register(lambda: cancel_all_orders_now(
+        getattr(global_state, 'client', None), "atexit 兜底撤单"
+    ))
 
     threading.Thread(target=start_background_thread, daemon=True).start()
-    print("🚀 Dashboard: http://0.0.0.0:8000")
+    print("🚀 Dashboard (Kappa Edition): http://0.0.0.0:8000")
+    print("📐 κ 自适应挂单已启用" if ENABLE_KAPPA_ADJUSTMENT else "📐 κ 影子模式（仅记录，不影响决策）")
     print("📋 挂单日志: http://0.0.0.0:8000/orders/log")
     print("🛑 一键撤单: POST http://0.0.0.0:8000/cancel_all")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    except KeyboardInterrupt:
+        _graceful_shutdown()

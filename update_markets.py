@@ -1,70 +1,102 @@
 import time
 import json
 import os
-import requests
-import pandas as pd
-import numpy as np
+import shutil
 import traceback
-import concurrent.futures
 from datetime import datetime
+
+import pandas as pd
+from gspread_dataframe import set_with_dataframe
 
 # 引入项目模块
 from data_updater.trading_utils import get_clob_client
 from data_updater.google_utils import get_spreadsheet
-from data_updater.find_markets import get_sel_df, get_all_markets, get_all_results, get_markets, add_volatility_to_df, batch_fetch_volumes
-from gspread_dataframe import set_with_dataframe
+from data_updater.find_markets import (
+    get_sel_df, get_all_markets, get_all_results,
+    get_markets, add_volatility_to_df, batch_fetch_volumes,
+)
 
-# 奖励快照文件路径（用于跨轮次对比）
+# ================= 配置常量 =================
+
+# 文件路径
 REWARD_SNAPSHOT_FILE = "reward_snapshot.json"
+RUST_STRATEGY_JSON_PATH = os.path.join(
+    os.path.dirname(__file__), "poly_maker_rs", "strategy_tokens.json"
+)
 
-# Rust 策略 JSON 导出路径
-RUST_STRATEGY_JSON_PATH = os.path.join(os.path.dirname(__file__), "poly_maker_rs", "strategy_tokens.json")
+# Smart LP 策略阈值
+SMART_SPREAD_MIN = 0.005
+SMART_SPREAD_MAX = 0.50
+SMART_REWARD_MIN = 0.5
 
-# ================= Global Setup =================
-spreadsheet = get_spreadsheet()
-client = get_clob_client()
+# Blue Ocean 策略阈值
+BLUE_SPREAD_MIN = 0.06
+BLUE_SPREAD_MAX = 0.10
+BLUE_REWARD_MIN = 1.5
+BLUE_VOL_MAX = 30
+BLUE_DAYS_MIN = 7
 
-# 定义 Worksheets
-wk_all = spreadsheet.worksheet("All Markets")
-wk_vol = spreadsheet.worksheet("Volatility Markets")
-wk_full = spreadsheet.worksheet("Full Markets")
+# Normal LP 策略阈值
+NORMAL_SPREAD_MIN = 0.01
+NORMAL_SPREAD_MAX = 0.04
+NORMAL_MID_REWARD_MIN = 0.5
+NORMAL_BURST_MAX = 0.5
+NORMAL_24H_VOL_MAX = 25
+NORMAL_DAYS_MIN = 7
 
-# 1. 总览表 (宽筛选)
-try:
-    wk_smart = spreadsheet.worksheet("Smart LP Strategy")
-except:
-    print("Creating new worksheet: Smart LP Strategy")
-    wk_smart = spreadsheet.add_worksheet(title="Smart LP Strategy", rows=100, cols=20)
+# High Reward Aggressive 策略阈值
+AGG_DAILY_RATE_MIN = 100
+AGG_REWARD_MIN = 2.0
+AGG_SPREAD_MIN = 0.02
+AGG_SPREAD_MAX = 0.12
+AGG_DAYS_MIN = 3
 
-# 2. 蓝海策略表 (宽点差、高息、低波)
-try:
-    wk_blue = spreadsheet.worksheet("Blue Ocean Strategy")
-except:
-    print("Creating new worksheet: Blue Ocean Strategy")
-    wk_blue = spreadsheet.add_worksheet(title="Blue Ocean Strategy", rows=100, cols=20)
+# 奖励变化检测阈值（USDC/天）
+REWARD_CHANGE_THRESHOLD = 1.0
 
-# 3. 正常稳健表 (适中点差、稳健)
-try:
-    wk_normal = spreadsheet.worksheet("Normal LP Strategy")
-except:
-    print("Creating new worksheet: Normal LP Strategy")
-    wk_normal = spreadsheet.add_worksheet(title="Normal LP Strategy", rows=100, cols=20)
+# Google Sheets 写入重试次数
+SHEETS_MAX_RETRIES = 3
 
-# 4. 高奖励激进策略表 (High Reward Aggressive)
-try:
-    wk_aggressive = spreadsheet.worksheet("High Reward Aggressive")
-except:
-    print("Creating new worksheet: High Reward Aggressive")
-    wk_aggressive = spreadsheet.add_worksheet(title="High Reward Aggressive", rows=100, cols=20)
 
-sel_df = get_sel_df(spreadsheet, "Selected Markets")
+# ================= 客户端初始化 =================
 
-# 5. 新增奖励监控表
-try:
-    wk_rewards = spreadsheet.worksheet("New Rewards Alert")
-except:
-    print("Creating new worksheet: New Rewards Alert")
-    wk_rewards = spreadsheet.add_worksheet(title="New Rewards Alert", rows=200, cols=15)
+_cached_sel_df = None
+
+
+def _get_or_create_worksheet(spreadsheet, name, rows=100, cols=20):
+    """获取或创建 worksheet"""
+    try:
+        return spreadsheet.worksheet(name)
+    except Exception:
+        print(f"Creating new worksheet: {name}")
+        return spreadsheet.add_worksheet(title=name, rows=rows, cols=cols)
+
+
+def _init_clients():
+    """
+    每轮循环重新初始化客户端和 worksheet 句柄。
+    避免 gspread auth token 过期导致后续 API 调用失败。
+    """
+    global _cached_sel_df
+
+    spreadsheet = get_spreadsheet()
+    client = get_clob_client()
+
+    worksheets = {
+        'all':        spreadsheet.worksheet("All Markets"),
+        'full':       spreadsheet.worksheet("Full Markets"),
+        'smart':      _get_or_create_worksheet(spreadsheet, "Smart LP Strategy"),
+        'blue':       _get_or_create_worksheet(spreadsheet, "Blue Ocean Strategy"),
+        'normal':     _get_or_create_worksheet(spreadsheet, "Normal LP Strategy"),
+        'aggressive': _get_or_create_worksheet(spreadsheet, "High Reward Aggressive"),
+        'rewards':    _get_or_create_worksheet(spreadsheet, "New Rewards Alert", rows=200, cols=15),
+    }
+
+    if _cached_sel_df is None:
+        _cached_sel_df = get_sel_df(spreadsheet, "Selected Markets")
+
+    return client, worksheets, _cached_sel_df
+
 
 # ================= 流动性奖励监控 =================
 
@@ -73,26 +105,44 @@ def load_reward_snapshot() -> dict:
     if os.path.exists(REWARD_SNAPSHOT_FILE):
         try:
             with open(REWARD_SNAPSHOT_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            pass
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+            print(f"⚠️ reward_snapshot.json 格式异常（期望 dict，实际 {type(data).__name__}），重置")
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"⚠️ 加载奖励快照失败: {e}，重置")
     return {}
 
 
 def save_reward_snapshot(snapshot: dict):
-    """保存本次奖励快照到本地文件"""
+    """原子写入：先写临时文件再 rename，避免写入中途崩溃损坏文件"""
     try:
-        with open(REWARD_SNAPSHOT_FILE, 'w') as f:
+        tmp_path = REWARD_SNAPSHOT_FILE + ".tmp"
+        with open(tmp_path, 'w') as f:
             json.dump(snapshot, f, indent=2)
-    except Exception as e:
+        shutil.move(tmp_path, REWARD_SNAPSHOT_FILE)
+    except OSError as e:
         print(f"⚠️ 保存奖励快照失败: {e}")
+
+
+def _has_reward(rewards) -> bool:
+    """检查市场是否有流动性奖励"""
+    if not isinstance(rewards, dict):
+        return False
+    rates = rewards.get('rates', [])
+    if not rates:
+        return False
+    for rate_info in rates:
+        if rate_info.get('rewards_daily_rate', 0) > 0:
+            return True
+    return False
 
 
 def fetch_reward_changes(m_data: pd.DataFrame) -> pd.DataFrame:
     """
     使用原始全量数据 m_data（含 rewards_daily_rate、condition_id 等字段），
     与上次快照对比，返回每日奖励总量增加的市场 DataFrame。
-    
+
     监控目标：用户向已存在的市场追加了流动性奖励（rewards_daily_rate 增加）。
     rewards_daily_rate 是每日奖励总量（USDC），由市场发起者或用户追加设定，
     不随订单簿深度变化，是判断"是否有人追加奖励"的最直接指标。
@@ -140,15 +190,14 @@ def fetch_reward_changes(m_data: pd.DataFrame) -> pd.DataFrame:
     # 加载上次快照
     prev_snapshot = load_reward_snapshot()
 
-    # 找出每日奖励总量增加的市场（阈值：增加超过 1 USDC/天）
-    CHANGE_THRESHOLD = 1.0
+    # 找出每日奖励总量增加的市场
     changes = []
     for row in rows:
         cid            = row['condition_id']
         new_daily_rate = row['new_daily_rate']
         prev_daily_rate = prev_snapshot.get(cid, 0)
 
-        if new_daily_rate > prev_daily_rate + CHANGE_THRESHOLD:
+        if new_daily_rate > prev_daily_rate + REWARD_CHANGE_THRESHOLD:
             row['prev_daily_rate']  = prev_daily_rate
             row['reward_added']     = round(new_daily_rate - prev_daily_rate, 2)
             row['detected_at']      = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -158,7 +207,7 @@ def fetch_reward_changes(m_data: pd.DataFrame) -> pd.DataFrame:
     save_reward_snapshot(current_snapshot)
 
     if not changes:
-        print(f"   ✅ 本轮无追加奖励（阈值: +{CHANGE_THRESHOLD} USDC/天）")
+        print(f"   ✅ 本轮无追加奖励（阈值: +{REWARD_CHANGE_THRESHOLD} USDC/天）")
         return pd.DataFrame()
 
     print(f"   🎉 发现 {len(changes)} 个奖励追加！")
@@ -182,8 +231,7 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
     与 main.py 的 _parse_sheet_tokens() 使用相同的解析逻辑。
     注意：不应用黑名单过滤（Rust 版本自行处理黑名单，标记 blacklisted 而非跳过）。
     """
-    tokens = []
-    seen_token_ids = {}
+    tokens_by_id = {}  # token_id -> token dict
 
     def _find_col(df, name):
         for col in df.columns:
@@ -214,7 +262,7 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
                 min_size = float(str(row.get(min_size_col, 10)).replace(",", "")) if min_size_col else 10.0
                 if min_size <= 0:
                     min_size = 10.0
-            except Exception:
+            except (ValueError, TypeError):
                 min_size = 10.0
 
             # neg_risk
@@ -232,7 +280,7 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
                         raw = float(ms_val)
                         if raw > 0:
                             max_spread = raw / 100.0  # 美分 → 小数
-                except Exception:
+                except (ValueError, TypeError):
                     max_spread = None
 
             # volatility_sum
@@ -240,14 +288,13 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
             if vol_col:
                 try:
                     vol_sum = float(str(row.get(vol_col, 0)).replace(",", ""))
-                except Exception:
+                except (ValueError, TypeError):
                     vol_sum = 0.0
 
             def add_token(token_id, token_type):
                 nonlocal added
-                if token_id not in seen_token_ids:
-                    seen_token_ids[token_id] = len(tokens)
-                    tokens.append({
+                if token_id not in tokens_by_id:
+                    tokens_by_id[token_id] = {
                         "token_id": token_id,
                         "token_type": token_type,
                         "question": question,
@@ -256,13 +303,13 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
                         "max_spread": max_spread,
                         "volatility_sum": vol_sum,
                         "source": source_label,
-                    })
+                    }
                     added += 1
                 else:
-                    idx = seen_token_ids[token_id]
-                    tokens[idx]["min_size"] = max(tokens[idx]["min_size"], min_size)
+                    existing = tokens_by_id[token_id]
+                    existing["min_size"] = max(existing["min_size"], min_size)
                     if max_spread is not None:
-                        tokens[idx]["max_spread"] = max_spread
+                        existing["max_spread"] = max_spread
 
             t1 = str(row.get("token1", "")).strip()
             if t1 and len(t1) > 10 and t1.lower() != "nan":
@@ -278,6 +325,8 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
     n1 = _parse_df(normal_df, "Normal LP")
     n2 = _parse_df(aggressive_df, "High Reward")
 
+    tokens = list(tokens_by_id.values())
+
     if not tokens:
         print("⚠️ [Rust JSON] 无 token 可导出，跳过")
         return
@@ -287,75 +336,195 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
             json.dump(tokens, f, indent=2, ensure_ascii=False)
         print(f"✅ [Rust JSON] 已导出 {len(tokens)} 个 token → {RUST_STRATEGY_JSON_PATH}")
         print(f"   Normal LP: {n1}, High Reward: {n2}")
-    except Exception as e:
+    except OSError as e:
         print(f"⚠️ [Rust JSON] 导出失败: {e}")
 
 
 # ================= Helper Functions =================
 
-def update_sheet(data, worksheet):
-    """优化版：直接 clear + write，省去先读取旧数据再 padding 的开销"""
-    worksheet.clear()
-    set_with_dataframe(worksheet, data, include_index=False, include_column_header=True, resize=True)
+def update_sheet(data, worksheet, retries=SHEETS_MAX_RETRIES):
+    """带重试的 Sheet 写入，避免 clear 成功但 write 失败导致表格被清空"""
+    for attempt in range(retries):
+        try:
+            worksheet.clear()
+            set_with_dataframe(worksheet, data, include_index=False, include_column_header=True, resize=True)
+            return
+        except Exception as e:
+            if attempt < retries - 1:
+                wait = 2 ** attempt
+                print(f"   ⚠️ Sheet 写入失败 (attempt {attempt + 1}/{retries}): {e}，{wait}s 后重试...")
+                time.sleep(wait)
+            else:
+                raise
+
 
 def clean_and_prepare_data(df):
-    """
-    统一的数据清洗和类型转换
-    """
+    """统一的数据清洗和类型转换"""
     sdf = df.copy()
 
-    # === [修改点 1] 定义所有波动率列名 ===
     vol_cols = ['1_hour', '3_hour', '6_hour', '12_hour', '24_hour', '7_day', '30_day']
 
-    # 确保关键指标是数值型 (加入 vol_cols 以便排序)
-    numeric_cols = ['spread', 'gm_reward_per_100', 'mid_reward_per_100', 'volatility_sum', 'burst_index', 'best_bid', 'best_ask', 'volume'] + vol_cols
+    # 确保关键指标是数值型（含 rewards_daily_rate，避免后续重复转换）
+    numeric_cols = [
+        'spread', 'gm_reward_per_100', 'mid_reward_per_100', 'volatility_sum',
+        'burst_index', 'best_bid', 'best_ask', 'volume', 'rewards_daily_rate',
+    ] + vol_cols
 
     for col in numeric_cols:
         if col in sdf.columns:
             sdf[col] = pd.to_numeric(sdf[col], errors='coerce').fillna(0)
-    
+
     # 计算 RV Ratio（保留原版 + 新增 mid 版本）
     if 'gm_reward_per_100' in sdf.columns and 'volatility_sum' in sdf.columns:
         sdf['rv_ratio'] = sdf['gm_reward_per_100'] / (sdf['volatility_sum'] + 0.001)
     if 'mid_reward_per_100' in sdf.columns and 'volatility_sum' in sdf.columns:
         sdf['mid_rv_ratio'] = sdf['mid_reward_per_100'] / (sdf['volatility_sum'] + 0.001)
-    
-    # === [修改点 2] 将详细波动率加入显示列表 ===
+
+    # 列排序（rewards_daily_rate 插入 spread 之后）
     priority_cols = [
         'question', 'mid_rv_ratio', 'rv_ratio', 'mid_reward_per_100', 'gm_reward_per_100', 'spread',
-        'volatility_sum'] + vol_cols + [  # 把详细波动率插在这里
+        'rewards_daily_rate', 'volatility_sum',
+    ] + vol_cols + [
         'burst_index', 'volume', 'days_to_expiry',
-        'best_bid', 'best_ask', 'answer1', 'market_slug', 'end_date'
+        'best_bid', 'best_ask', 'answer1', 'market_slug', 'end_date',
     ]
-    
+
     # 确保只取存在的列
     final_cols = [c for c in priority_cols if c in sdf.columns]
     remaining_cols = [c for c in sdf.columns if c not in final_cols]
-    
+
     return sdf[final_cols + remaining_cols]
 
+
+# ================= 策略筛选 =================
+
+def _apply_strategy_filters(master_df):
+    """对 master_df 应用四大策略筛选，返回各策略 DataFrame 的 dict"""
+
+    # --- 策略 0: Smart LP 总览 (宽口径，用于查漏补缺) ---
+    smart_df = master_df[
+        (master_df['spread'] >= SMART_SPREAD_MIN) &
+        (master_df['spread'] <= SMART_SPREAD_MAX) &
+        (master_df['gm_reward_per_100'] > SMART_REWARD_MIN)
+    ].sort_values('rv_ratio', ascending=False)
+
+    # --- 策略 1: 蓝海策略 (Blue Ocean) ---
+    # 到期：>7天 或无到期日（days_to_expiry==0 表示无到期日/解析失败，应放进来）
+    blue_ocean_df = master_df[
+        (master_df['spread'] > BLUE_SPREAD_MIN) &
+        (master_df['spread'] <= BLUE_SPREAD_MAX) &
+        (master_df['gm_reward_per_100'] > BLUE_REWARD_MIN) &
+        (master_df['volatility_sum'] < BLUE_VOL_MAX) &
+        ((master_df['days_to_expiry'] > BLUE_DAYS_MIN) | (master_df['days_to_expiry'] == 0))
+    ].sort_values('gm_reward_per_100', ascending=False)
+
+    # --- 策略 2: 正常稳健策略 (Normal LP) ---
+    _has_24h = '24_hour' in master_df.columns
+    _has_burst = 'burst_index' in master_df.columns
+    normal_mask = (
+        (master_df['spread'] >= NORMAL_SPREAD_MIN) &
+        (master_df['spread'] <= NORMAL_SPREAD_MAX) &
+        (master_df['mid_reward_per_100'] >= NORMAL_MID_REWARD_MIN) &
+        ((master_df['days_to_expiry'] > NORMAL_DAYS_MIN) | (master_df['days_to_expiry'] == 0))
+    )
+    if _has_burst:
+        normal_mask = normal_mask & (master_df['burst_index'] <= NORMAL_BURST_MAX)
+    if _has_24h:
+        normal_mask = normal_mask & (master_df['24_hour'] <= NORMAL_24H_VOL_MAX)
+    normal_lp_df = master_df[normal_mask].sort_values('mid_rv_ratio', ascending=False)
+
+    # --- 策略 3: 高奖励激进策略 (High Reward Aggressive) ---
+    if 'rewards_daily_rate' in master_df.columns:
+        aggressive_df = master_df[
+            (master_df['rewards_daily_rate'] >= AGG_DAILY_RATE_MIN) &
+            (master_df['gm_reward_per_100'] >= AGG_REWARD_MIN) &
+            (master_df['spread'] >= AGG_SPREAD_MIN) &
+            (master_df['spread'] <= AGG_SPREAD_MAX) &
+            ((master_df['days_to_expiry'] > AGG_DAYS_MIN) | (master_df['days_to_expiry'] == 0))
+        ].sort_values('gm_reward_per_100', ascending=False)
+    else:
+        aggressive_df = pd.DataFrame()
+
+    print(f"Strategy Matches Found:")
+    print(f"  - Smart LP (Master): {len(smart_df)}")
+    print(f"  - Blue Ocean: {len(blue_ocean_df)}")
+    print(f"  - Normal LP: {len(normal_lp_df)}")
+    print(f"  - High Reward Aggressive: {len(aggressive_df)}")
+
+    return {
+        'smart': smart_df,
+        'blue': blue_ocean_df,
+        'normal': normal_lp_df,
+        'aggressive': aggressive_df,
+    }
+
+
+# ================= Sheets 写入 =================
+
+def _write_all_sheets(strategies, master_df, m_data, worksheets):
+    """串行写入 Google Sheets（避免共享 gspread 会话的线程安全问题）"""
+    agg_data = strategies['aggressive']
+    if agg_data.empty:
+        agg_data = pd.DataFrame([{'question': '当前无符合条件的高奖励市场'}])
+
+    sheet_tasks = [
+        (strategies['smart'],  worksheets['smart'],      'Smart LP Strategy'),
+        (strategies['blue'],   worksheets['blue'],       'Blue Ocean Strategy'),
+        (strategies['normal'], worksheets['normal'],     'Normal LP Strategy'),
+        (agg_data,             worksheets['aggressive'], 'High Reward Aggressive'),
+    ]
+    # 全量更新时加入基础表
+    if len(master_df) > 20:
+        sheet_tasks.append((master_df, worksheets['all'],  'All Markets'))
+        sheet_tasks.append((m_data,    worksheets['full'], 'Full Markets'))
+
+    for data, ws, name in sheet_tasks:
+        try:
+            update_sheet(data, ws)
+            print(f"-> Updated '{name}' ({len(data)} rows)")
+        except Exception as e:
+            print(f"⚠️ Failed '{name}': {e}")
+
+
+# ================= 奖励监控写入 =================
+
+def _run_reward_monitor(m_data, wk_rewards):
+    """执行奖励监控并更新 Google Sheet"""
+    reward_changes_df = fetch_reward_changes(m_data)
+    if not reward_changes_df.empty:
+        update_sheet(reward_changes_df, wk_rewards)
+        print(f"-> Updated 'New Rewards Alert' ({len(reward_changes_df)} 条变化)")
+    else:
+        no_change_df = pd.DataFrame([{
+            'question': '✅ 本轮未发现新增/追加奖励',
+            'prev_daily_rate': '',
+            'new_daily_rate': '',
+            'reward_added': '',
+            'gm_reward_per_100': '',
+            'spread': '',
+            'volume': '',
+            'token1': '',
+            'token2': '',
+            'condition_id': '',
+            'detected_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        }])
+        update_sheet(no_change_df, wk_rewards)
+        print("-> Updated 'New Rewards Alert' (无变化)")
+
+
+# ================= 主流程 =================
+
 def fetch_and_process_data():
-    global spreadsheet, client, wk_all, wk_vol, wk_smart, wk_blue, wk_normal, wk_full, wk_rewards, sel_df
-    
-    print(f"[{pd.to_datetime('now')}] Starting fetch cycle...")
+    print(f"[{datetime.now()}] Starting fetch cycle...")
+
+    # 每轮重新初始化客户端（避免 token 过期）
+    client, worksheets, sel_df = _init_clients()
 
     # 1. 获取数据
     all_df = get_all_markets(client)
     print(f"Got all Markets: {len(all_df)}")
 
     # 🔥 性能优化：提前过滤无奖励市场，避免对 3000+ 个无奖励市场调用订单簿 API
-    def _has_reward(rewards):
-        """检查市场是否有流动性奖励"""
-        if not isinstance(rewards, dict):
-            return False
-        rates = rewards.get('rates', [])
-        if not rates:
-            return False
-        for rate_info in rates:
-            if rate_info.get('rewards_daily_rate', 0) > 0:
-                return True
-        return False
-
     if 'rewards' in all_df.columns:
         rewarded_df = all_df[all_df['rewards'].apply(_has_reward)].reset_index(drop=True)
         print(f"🔥 [性能优化] 有奖励的市场: {len(rewarded_df)} / {len(all_df)}（跳过 {len(all_df) - len(rewarded_df)} 个无奖励市场）")
@@ -387,14 +556,14 @@ def fetch_and_process_data():
 
     # 2. 计算波动率（并发数提升到 25，加速波动率获取）
     new_df = add_volatility_to_df(valid_markets, max_workers=25)
-    
+
     # 3. 基础数据处理
     for col in ['24_hour', '7_day', '14_day']:
         if col in new_df.columns:
             new_df[col] = pd.to_numeric(new_df[col], errors='coerce').fillna(0)
     new_df['volatility_sum'] = new_df['24_hour'] + new_df['7_day'] + new_df['14_day']
-    
-    # 计算日期
+
+    # 计算到期天数
     if 'end_date' in new_df.columns:
         try:
             new_df['end_date'] = pd.to_datetime(new_df['end_date'], errors='coerce')
@@ -404,161 +573,44 @@ def fetch_and_process_data():
                 new_df['days_to_expiry'] = (new_df['end_date'] - now).dt.days
             else:
                 new_df['days_to_expiry'] = (new_df['end_date'].dt.tz_localize(None) - now).dt.days
-        except:
+        except (ValueError, TypeError) as e:
+            print(f"⚠️ 日期解析异常: {e}")
             new_df['days_to_expiry'] = 0
 
-    # 4. 准备用于筛选的 Clean DataFrame
+    # 4. 清洗数据
     master_df = clean_and_prepare_data(new_df)
 
-    # ================== 执行三大策略筛选 ==================
-
+    # 5. 策略筛选
     print("Applying filters...")
+    strategies = _apply_strategy_filters(master_df)
 
-    # --- 策略 0: Smart LP 总览 (宽口径，用于查漏补缺) ---
-    # 只要不是死盘(Volume>0)且点差不过分(Spread<0.5)都放进来
-    smart_df = master_df[
-        (master_df['spread'] >= 0.005) & 
-        (master_df['spread'] <= 0.50) &
-        (master_df['gm_reward_per_100'] > 0.5)
-    ].sort_values('rv_ratio', ascending=False)
-
-    # --- 策略 1: 蓝海策略 (Blue Ocean) ---
-    # 要求：0.06 < Spread <= 0.10, Reward > 1.5, Volatility < 30
-    # 到期：>7天 或无到期日（days_to_expiry==0 表示无到期日/解析失败，应放进来）
-    blue_ocean_df = master_df[
-        (master_df['spread'] > 0.06) & 
-        (master_df['spread'] <= 0.10) & 
-        (master_df['gm_reward_per_100'] > 1.5) & 
-        (master_df['volatility_sum'] < 30) &
-        ((master_df['days_to_expiry'] > 7) | (master_df['days_to_expiry'] == 0))
-    ].sort_values('gm_reward_per_100', ascending=False)
-
-    # --- 策略 2: 正常稳健策略 (Normal LP) ---
-    # 条件：mid_reward_per_100 >= 0.5；burst_index <= 0.5；24_hour <= 25（日级波动可控）
-    # 保留：0.02 <= Spread <= 0.04，到期 >7天 或无到期日
-    # 排序：mid_rv_ratio 降序
-    _has_24h = '24_hour' in master_df.columns
-    _has_burst = 'burst_index' in master_df.columns
-    normal_mask = (
-        (master_df['spread'] >= 0.01) &
-        (master_df['spread'] <= 0.04) &
-        (master_df['mid_reward_per_100'] >= 0.5) &
-        ((master_df['days_to_expiry'] > 7) | (master_df['days_to_expiry'] == 0))
-    )
-    if _has_burst:
-        normal_mask = normal_mask & (master_df['burst_index'] <= 0.5)
-    if _has_24h:
-        normal_mask = normal_mask & (master_df['24_hour'] <= 25)
-    normal_lp_df = master_df[normal_mask].sort_values('mid_rv_ratio', ascending=False)
-
-    # --- 策略 3: 高奖励激进策略 (High Reward Aggressive) ---
-    # 目标：博收益，刀口舔血，高奖励覆盖风险，靠防御快速撤单
-    # 要求：rewards_daily_rate >= 100（每日总奖励 >= $100）
-    # gm_reward_per_100 >= 2.0（每$100挂单奖励 >= $2/天）
-    # Spread: 2-12c（放宽，高奖励市场点差通常较宽）
-    # 波动率：不限（靠超敏感防御保护）
-    # 到期：>3天 或无到期日（短期也可以）
-    # 排序：gm_reward_per_100 降序（奖励率最高的优先）
-    # 确保 rewards_daily_rate 列存在
-    if 'rewards_daily_rate' in master_df.columns:
-        master_df['rewards_daily_rate'] = pd.to_numeric(master_df['rewards_daily_rate'], errors='coerce').fillna(0)
-        aggressive_df = master_df[
-            (master_df['rewards_daily_rate'] >= 100) &
-            (master_df['gm_reward_per_100'] >= 2.0) &
-            (master_df['spread'] >= 0.02) &
-            (master_df['spread'] <= 0.12) &
-            ((master_df['days_to_expiry'] > 3) | (master_df['days_to_expiry'] == 0))
-        ].sort_values('gm_reward_per_100', ascending=False)
-    else:
-        aggressive_df = pd.DataFrame()
-
-    print(f"Strategy Matches Found:")
-    print(f"  - Smart LP (Master): {len(smart_df)}")
-    print(f"  - Blue Ocean: {len(blue_ocean_df)}")
-    print(f"  - Normal LP: {len(normal_lp_df)}")
-    print(f"  - High Reward Aggressive: {len(aggressive_df)}")
-
-    # ================== 更新 Google Sheets（并行写入）==================
+    # 6. 更新 Google Sheets
     if len(master_df) > 0:
         try:
-            print("Updating Sheets (parallel)...")
-            
-            # 准备 aggressive 数据
-            if aggressive_df.empty:
-                agg_data = pd.DataFrame([{'question': '当前无符合条件的高奖励市场'}])
-            else:
-                agg_data = aggressive_df
-
-            # 构建写入任务列表：(数据, worksheet, 名称)
-            sheet_tasks = [
-                (smart_df, wk_smart, 'Smart LP Strategy'),
-                (blue_ocean_df, wk_blue, 'Blue Ocean Strategy'),
-                (normal_lp_df, wk_normal, 'Normal LP Strategy'),
-                (agg_data, wk_aggressive, 'High Reward Aggressive'),
-            ]
-            # 全量更新时加入基础表
-            if len(master_df) > 20:
-                sheet_tasks.append((master_df, wk_all, 'All Markets'))
-                sheet_tasks.append((m_data, wk_full, 'Full Markets'))
-
-            # 🔥 并行写入 Google Sheets（从串行 6 次 → 并行，节省 5-15 秒）
-            def _update_one(task):
-                data, ws, name = task
-                try:
-                    update_sheet(data, ws)
-                    return f"-> Updated '{name}' ({len(data)} rows)"
-                except Exception as e:
-                    return f"⚠️ Failed '{name}': {e}"
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(sheet_tasks)) as executor:
-                futures = [executor.submit(_update_one, t) for t in sheet_tasks]
-                for future in concurrent.futures.as_completed(futures):
-                    print(future.result())
-            
-            print(f"[{pd.to_datetime('now')}] Update Cycle Completed Successfully.")
-            
+            print("Updating Sheets...")
+            _write_all_sheets(strategies, master_df, m_data, worksheets)
+            print(f"[{datetime.now()}] Update Cycle Completed Successfully.")
         except Exception as e:
             print(f"Error updating sheets: {e}")
             traceback.print_exc()
 
-        # ================== 自动导出 Rust strategy_tokens.json ==================
+        # 自动导出 Rust strategy_tokens.json
         try:
-            export_strategy_tokens_json(normal_lp_df, aggressive_df)
+            export_strategy_tokens_json(strategies['normal'], strategies['aggressive'])
         except Exception as e:
             print(f"⚠️ [Rust JSON] 导出异常: {e}")
             traceback.print_exc()
-
     else:
         print("No data found to update.")
 
-    # ================== 流动性奖励监控 ==================
+    # 7. 流动性奖励监控
     # 注意：使用 m_data（原始全量数据，含 rewards_daily_rate 字段）
-    # 而非 master_df（master_df 经过 clean_and_prepare_data 处理，可能丢失该字段）
     try:
-        reward_changes_df = fetch_reward_changes(m_data)
-        if not reward_changes_df.empty:
-            update_sheet(reward_changes_df, wk_rewards)
-            print(f"-> Updated 'New Rewards Alert' ({len(reward_changes_df)} 条变化)")
-        else:
-            # 无变化时清空表格，只保留标题行提示
-            no_change_df = pd.DataFrame([{
-                'question': '✅ 本轮未发现新增/追加奖励',
-                'prev_daily_rate': '',
-                'new_daily_rate': '',
-                'reward_added': '',
-                'gm_reward_per_100': '',
-                'spread': '',
-                'volume': '',
-                'token1': '',
-                'token2': '',
-                'condition_id': '',
-                'detected_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
-            }])
-            update_sheet(no_change_df, wk_rewards)
-            print("-> Updated 'New Rewards Alert' (无变化)")
+        _run_reward_monitor(m_data, worksheets['rewards'])
     except Exception as e:
         print(f"⚠️ 奖励监控更新失败: {e}")
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     print("Starting Data Updater with Specific Strategies...")
@@ -566,7 +618,7 @@ if __name__ == "__main__":
         try:
             fetch_and_process_data()
             print("Sleeping for 1 hour...")
-            time.sleep(60 * 60) 
+            time.sleep(60 * 60)
         except KeyboardInterrupt:
             print("Stopping...")
             break
