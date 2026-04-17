@@ -28,6 +28,8 @@ import time
 import requests
 from datetime import datetime, timezone, timedelta
 
+import market_heat
+
 # Google 表格工具
 os.environ.setdefault("SPREADSHEET_URL", "https://docs.google.com/spreadsheets/d/1BwMq7kVN7wJXtOM73EZvWUF6D6x26wjIInrMBsAacY0/edit")
 
@@ -763,6 +765,12 @@ def monitor_rewards():
                     print(f"   市场: {market_info.get('question', '未知')[:55]}")
                     print(f"   金额: {parsed['amount_usdc']:.2f} USDC.e")
                     print(f"{'='*60}")
+
+                # 🌡️ 记录热度事件（reward_shock）→ 写入 market_heat_state.json
+                _heat_question = market_info.get("question", "")
+                for _heat_tid in (market_info.get("token1", ""), market_info.get("token2", "")):
+                    if _heat_tid and len(_heat_tid) > 10:
+                        market_heat.tracker.record_reward_shock(_heat_tid, question=_heat_question)
 
                 # 写入 Google 表格（金额 >= 100 USDC 时）
                 write_to_new_rewards_sheet(parsed, market_info)

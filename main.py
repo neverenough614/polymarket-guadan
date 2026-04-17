@@ -20,6 +20,7 @@ from poly_data.polymarket_client import PolymarketClient
 from poly_data.data_utils import update_markets, update_positions, update_orders
 from poly_data.websocket_handlers import connect_market_websocket
 import poly_data.global_state as global_state
+import market_heat
 
 # ======================================================
 # ⚙️ 自动挂单配置
@@ -45,7 +46,7 @@ QUESTION_HARD_BLACKLIST = [
     # 在这里添加你想完全屏蔽的关键词，每个一行，例如：
     "NFL",
     "Iran","Iranian","Israel","Oil","March", "Winner", "Champion", "NBA", "Presidential", "Leader", "Nominee", "Supreme", "Bitcoin", "Democratic", "Trump", "Elon",
-    "Gold", "Mojtaba","Lakers",
+    "Gold", "Mojtaba","Lakers","election","Minister","vs","Spread","win",
 ]
 
 DEPTH_THRESHOLD_TIER1   = 1500.0   # 第1档深度阈值（USDC），提高门槛确保只有深厚市场才挂第一档
@@ -713,14 +714,28 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
             result["error"] = f"前三档深度不足以支撑最小奖励挂单量 {base_min_size:.0f} shares，跳过"
             return result
 
+        # 🌡️ 热度缩单：WARM=0.5x, HOT=0.15x（FROZEN 已在 run_auto_place_orders 拦截）
+        heat_state = token_info.get("_heat_state", "SAFE")
+        heat_multiplier = market_heat.HEAT_SIZE_MULTIPLIER.get(heat_state, 1.0)
+        if heat_multiplier < 1.0:
+            original_size = order_size
+            order_size = max(1.0, round(order_size * heat_multiplier))
+            if order_size < base_min_size:
+                result["buy_status"] = "heat_shrink_below_min"
+                result["sell_status"] = "heat_shrink_below_min"
+                result["error"] = f"热度缩单 {original_size:.0f}→{order_size:.0f} < 最小量{base_min_size:.0f} (state={heat_state})"
+                return result
+            result["order_size"] = order_size
+
         # 极端价格检测
         extreme = is_extreme_price_market(best_bid)
         result["extreme_price"] = extreme
 
         # 复用同一个 book 对象分析买卖最优档位（不再重复请求 API）
         # 🚫 黑名单市场跳过第一档，从第二档开始挂单
+        # 🌡️ WARM/HOT 状态也跳过第一档
         blacklisted = token_info.get("blacklisted", False)
-        skip_t1 = blacklisted or FORCE_SKIP_TIER1
+        skip_t1 = blacklisted or FORCE_SKIP_TIER1 or heat_state in ("WARM", "HOT")
         buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_bids)
         sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_asks)
 
@@ -903,6 +918,22 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
     if len(filtered_tokens) < len(strategy_tokens):
         print(f"   🚫 硬黑名单兜底过滤: {len(strategy_tokens) - len(filtered_tokens)} 个被拦截")
     strategy_tokens = filtered_tokens
+
+    # 🌡️ 动态热度检查：FROZEN 市场不挂单，其余状态传递给 place_order_for_token 做缩单/跳档
+    heat_filtered = []
+    frozen_count = 0
+    for t in strategy_tokens:
+        h_state, h_score, h_reason = market_heat.tracker.get_heat_state(t["token_id"])
+        if h_state == "FROZEN":
+            frozen_count += 1
+            print(f"   🌡️ [FROZEN] 跳过: {t['question'][:50]} (score={h_score}, {h_reason})")
+        else:
+            t["_heat_state"] = h_state
+            t["_heat_score"] = h_score
+            heat_filtered.append(t)
+    if frozen_count > 0:
+        print(f"   🌡️ 热度冻结过滤: {frozen_count} 个市场跳过")
+    strategy_tokens = heat_filtered
 
     print(f"\n{'='*60}")
     print(f"🔍 [自动挂单] 并发分析 {len(strategy_tokens)} 个 token（{PLACE_ORDER_WORKERS} 线程）...")
@@ -1842,6 +1873,8 @@ async def monitor_defense_loop(strategy_tokens: list):
                             print(f"   🚨 [偏斜] 卖方深度严重不足！买/卖={bid_ratio:.0%}/{ask_ratio:.0%} (${imb_bid_depth:.0f}/${imb_ask_depth:.0f})，价格可能上涨 → 撤卖单")
 
                         if imbalance_triggered and ENABLE_AUTO_DEFENSE and danger_side:
+                            # 🌡️ 记录热度事件
+                            market_heat.tracker.record_defense_trigger(token_id, question=t["question"])
                             # 只撤危险方向的单，保留安全方向
                             await asyncio.to_thread(cancel_one_side_orders, poly_client, token_id, danger_side, t["question"])
                             state.first_run = True
@@ -1909,6 +1942,9 @@ async def monitor_defense_loop(strategy_tokens: list):
                 state.first_run = False
 
                 if triggered:
+                    # 🌡️ 记录热度事件（无论防御是否开启都要记录）
+                    market_heat.tracker.record_defense_trigger(token_id, question=state.question)
+
                     print(f"\n\n{'!'*20} ⚡ 检测到危险信号 ⚡ {'!'*20}")
                     print(f"⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                     print(f"🎯 目标: {state.question[:50]}")
@@ -2033,6 +2069,12 @@ async def api_cancel_all():
     return {"status": "ok", "message": "撤单指令已发送"}
 
 
+@app.get("/heat")
+def get_heat_summary():
+    """查看所有非 SAFE 市场的热度状态"""
+    return market_heat.tracker.get_all_states_summary()
+
+
 # ======================================================
 # 🚀 主启动流程
 # ======================================================
@@ -2062,6 +2104,26 @@ async def market_ws_loop():
             print("[WS] Error:", e)
             traceback.print_exc()
         await asyncio.sleep(5)
+
+
+HEAT_DECAY_INTERVAL = 1800  # 热度衰减检查间隔（秒，30 分钟）
+
+async def heat_decay_task():
+    """每 30 分钟：同步 reward_monitor 写入的 reward_shock + 清理过期热度状态"""
+    print(f"🌡️ [热度衰减] 任务已启动（每 {HEAT_DECAY_INTERVAL}s 检查）")
+    while True:
+        await asyncio.sleep(HEAT_DECAY_INTERVAL)
+        try:
+            market_heat.tracker.sync_from_disk()
+            market_heat.tracker.decay_all()
+            summary = market_heat.tracker.get_all_states_summary()
+            if summary:
+                ts = datetime.now().strftime("%H:%M:%S")
+                print(f"\n🌡️ [{ts}] 热度概览: {len(summary)} 个非 SAFE 市场")
+                for s in summary[:10]:
+                    print(f"   {s['state']:6s} score={s['score']:3d} | {s['question']} | {s['reason']}")
+        except Exception as e:
+            print(f"⚠️ [热度衰减] 异常: {e}")
 
 
 async def auto_place_and_monitor():
@@ -2094,6 +2156,7 @@ async def auto_place_and_monitor():
         sheet_sync_task(strategy_tokens),           # 每小时表格同步
         auto_close_positions_task(strategy_tokens), # 自动清仓
         spread_check_task(strategy_tokens),         # 插队检测 + Q score 无效挂单检测
+        heat_decay_task(),                          # 🌡️ 热度衰减 + 跨进程同步
     )
 
 
