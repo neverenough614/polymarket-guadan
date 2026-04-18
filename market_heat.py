@@ -19,6 +19,8 @@ reward_shock 的用法（重要）:
 """
 
 import json
+import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -71,7 +73,7 @@ class MarketHeatEntry:
         "frozen_until", "question", "last_state_change",
     )
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.state: str = "SAFE"
         self.score: int = 0
         self.defense_trigger_times: List[float] = []
@@ -109,7 +111,7 @@ class MarketHeatEntry:
 # ======================================================
 
 class MarketHeatTracker:
-    def __init__(self, state_file: str = DEFAULT_STATE_FILE):
+    def __init__(self, state_file: str = DEFAULT_STATE_FILE) -> None:
         self._lock = threading.Lock()
         self._entries: Dict[str, MarketHeatEntry] = {}
         self._state_file = Path(state_file)
@@ -117,25 +119,60 @@ class MarketHeatTracker:
 
     # ── 持久化 ──────────────────────────────────────────
 
-    def _load(self):
+    def _read_disk(self) -> Dict[str, dict]:
+        """
+        从磁盘读原始数据（不转换为对象）。容忍 JSONDecodeError（并发写入半成品）。
+        """
         if not self._state_file.exists():
-            return
+            return {}
         try:
-            raw = json.loads(self._state_file.read_text(encoding="utf-8"))
-            for token_id, d in raw.items():
-                self._entries[token_id] = MarketHeatEntry.from_dict(d)
-            print(f"🌡️ [热度] 从 {self._state_file} 加载了 {len(self._entries)} 个市场状态")
-        except Exception as e:
-            print(f"⚠️ [热度] 加载状态文件失败: {e}，将从空白开始")
+            text = self._state_file.read_text(encoding="utf-8")
+            if not text.strip():
+                return {}
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # 可能是另一进程正在写入中途被我们读到
+            return {}
+        except OSError as e:
+            print(f"⚠️ [热度] 读取状态文件失败: {e}")
+            return {}
 
-    def _save(self):
+    def _load(self) -> None:
+        raw = self._read_disk()
+        for token_id, d in raw.items():
+            try:
+                self._entries[token_id] = MarketHeatEntry.from_dict(d)
+            except (KeyError, TypeError, ValueError):
+                continue
+        if self._entries:
+            print(f"🌡️ [热度] 从 {self._state_file} 加载了 {len(self._entries)} 个市场状态")
+
+    def _save(self) -> None:
+        """
+        原子写入：先写临时文件到同目录，再 os.replace 覆盖目标。
+        避免两个进程并发写入导致 JSON 被截断或交叉。
+        """
         try:
             data = {tid: e.to_dict() for tid, e in self._entries.items()}
-            self._state_file.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False),
-                encoding="utf-8",
+            serialized = json.dumps(data, indent=2, ensure_ascii=False)
+            directory = self._state_file.parent if self._state_file.parent != Path("") else Path(".")
+            fd, tmp_path = tempfile.mkstemp(
+                prefix=self._state_file.name + ".",
+                suffix=".tmp",
+                dir=str(directory),
             )
-        except Exception as e:
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(serialized)
+                os.replace(tmp_path, self._state_file)
+            except OSError:
+                # 清理未成功替换的 tmp 文件
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        except OSError as e:
             print(f"⚠️ [热度] 保存状态文件失败: {e}")
 
     # ── 内部工具 ────────────────────────────────────────
@@ -149,13 +186,19 @@ class MarketHeatTracker:
             self._entries[token_id].question = question
         return self._entries[token_id]
 
+    def _prune_expired_triggers(self, e: MarketHeatEntry) -> None:
+        """剪掉 2h 窗口外的防御触发时间戳。调用方必须持有 self._lock。"""
+        cutoff = time.time() - DEFENSE_TRIGGER_WINDOW_SECS
+        e.defense_trigger_times = [t for t in e.defense_trigger_times if t > cutoff]
+
     def _calc_score(self, e: MarketHeatEntry) -> int:
-        """从原始信号重新计算分数（无状态副作用）"""
+        """
+        根据当前信号计算分数。纯函数，不修改 entry。
+        调用方应先调用 _prune_expired_triggers 处理滚动窗口。
+        """
         now = time.time()
 
-        # 1. 防御触发（滚动 2h 窗口）
-        cutoff = now - DEFENSE_TRIGGER_WINDOW_SECS
-        e.defense_trigger_times = [t for t in e.defense_trigger_times if t > cutoff]
+        # 1. 防御触发：读取（不剪枝）
         n = min(len(e.defense_trigger_times), DEFENSE_TRIGGER_MAX_COUNT)
         score = n * DEFENSE_TRIGGER_SCORE
 
@@ -171,6 +214,11 @@ class MarketHeatTracker:
 
         return min(score, 100)
 
+    def _refresh_score(self, e: MarketHeatEntry) -> int:
+        """剪枝过期触发，然后计算当前分数。调用方必须持有 self._lock。"""
+        self._prune_expired_triggers(e)
+        return self._calc_score(e)
+
     def _determine_state(self, e: MarketHeatEntry, score: int) -> str:
         now = time.time()
         # FROZEN 有强制冷却期：未到期则保持 FROZEN
@@ -185,7 +233,7 @@ class MarketHeatTracker:
             return "WARM"
         return "SAFE"
 
-    def _set_frozen_cooldown(self, e: MarketHeatEntry):
+    def _set_frozen_cooldown(self, e: MarketHeatEntry) -> None:
         n = len(e.defense_trigger_times)
         if n >= 3:
             secs = FROZEN_COOLDOWN_MAP["high"]
@@ -209,23 +257,23 @@ class MarketHeatTracker:
 
     # ── 公开接口：记录事件 ──────────────────────────────
 
-    def record_defense_trigger(self, token_id: str, question: str = ""):
+    def record_defense_trigger(self, token_id: str, question: str = "") -> None:
         """防御系统触发时调用（深度跌幅/偏斜/趋势检测命中）"""
         with self._lock:
             e = self._get_or_create(token_id, question)
             e.defense_trigger_times.append(time.time())
-            score = self._calc_score(e)
+            score = self._refresh_score(e)
             old, new = self._apply_state_change(e, score)
             self._save()
             if old != new:
                 _log_state_change(e.question, old, new, score, "防御触发")
 
-    def record_reward_shock(self, token_id: str, question: str = ""):
+    def record_reward_shock(self, token_id: str, question: str = "") -> None:
         """链上检测到新 sponsor/reward 事件时调用"""
         with self._lock:
             e = self._get_or_create(token_id, question)
             e.reward_shock_time = time.time()
-            score = self._calc_score(e)
+            score = self._refresh_score(e)
             old, new = self._apply_state_change(e, score)
             self._save()
             if old != new:
@@ -242,7 +290,7 @@ class MarketHeatTracker:
             if token_id not in self._entries:
                 return "SAFE", 0, ""
             e = self._entries[token_id]
-            score = self._calc_score(e)
+            score = self._refresh_score(e)
             old, new = self._apply_state_change(e, score)
             if old != new:
                 self._save()
@@ -261,39 +309,42 @@ class MarketHeatTracker:
 
     # ── 公开接口：跨进程同步 ────────────────────────────
 
-    def sync_from_disk(self):
+    def sync_from_disk(self) -> None:
         """
-        从 JSON 文件合并外部进程写入的更新（如 reward_monitor.py 的 reward_shock）。
-        只合并 reward_shock_time（取较新的值），不覆盖内存中的防御触发数据。
+        从 JSON 文件合并外部进程写入的 reward_shock 更新。
+        - 已存在的 token: 只取较新的 reward_shock_time 合并，不动防御触发数据
+        - 新 token: 只构造最小 entry（reward_shock + question），不导入可能过期的
+          防御触发数据（防御数据只信任主进程 main.py 实时写入）
         """
-        if not self._state_file.exists():
+        raw = self._read_disk()
+        if not raw:
             return
         with self._lock:
-            try:
-                raw = json.loads(self._state_file.read_text(encoding="utf-8"))
-                merged = 0
-                for token_id, d in raw.items():
-                    disk_shock = d.get("reward_shock_time")
-                    if not disk_shock:
-                        continue
-                    if token_id in self._entries:
-                        mem_shock = self._entries[token_id].reward_shock_time
-                        if mem_shock is None or disk_shock > mem_shock:
-                            self._entries[token_id].reward_shock_time = disk_shock
-                            if d.get("question"):
-                                self._entries[token_id].question = d["question"]
-                            merged += 1
-                    else:
-                        self._entries[token_id] = MarketHeatEntry.from_dict(d)
+            merged = 0
+            for token_id, d in raw.items():
+                disk_shock = d.get("reward_shock_time")
+                if not disk_shock:
+                    continue
+                if token_id in self._entries:
+                    mem_shock = self._entries[token_id].reward_shock_time
+                    if mem_shock is None or disk_shock > mem_shock:
+                        self._entries[token_id].reward_shock_time = disk_shock
+                        if d.get("question"):
+                            self._entries[token_id].question = d["question"]
                         merged += 1
-                if merged > 0:
-                    print(f"🌡️ [热度·同步] 从磁盘合并了 {merged} 个 reward_shock 更新")
-            except Exception as e:
-                print(f"⚠️ [热度·同步] 读取磁盘状态失败: {e}")
+                else:
+                    # 新 token：只带 reward_shock 和 question，不导入防御触发数据
+                    e = MarketHeatEntry()
+                    e.reward_shock_time = disk_shock
+                    e.question = d.get("question", "")
+                    self._entries[token_id] = e
+                    merged += 1
+            if merged > 0:
+                print(f"🌡️ [热度·同步] 从磁盘合并了 {merged} 个 reward_shock 更新")
 
     # ── 公开接口：定期维护 ──────────────────────────────
 
-    def decay_all(self):
+    def decay_all(self) -> None:
         """
         周期性调用（建议每 30 分钟）：
         - 检查 FROZEN 冷却到期的市场，重新评估状态
@@ -304,7 +355,7 @@ class MarketHeatTracker:
             stale_ids = []
 
             for token_id, e in self._entries.items():
-                score = self._calc_score(e)
+                score = self._refresh_score(e)
                 old, new = self._apply_state_change(e, score)
                 if old != new:
                     changed = True
@@ -330,7 +381,7 @@ class MarketHeatTracker:
             result = []
             for token_id, e in self._entries.items():
                 # 刷新分数
-                score = self._calc_score(e)
+                score = self._refresh_score(e)
                 e.score = score
                 state = self._determine_state(e, score)
                 if state == "SAFE":
@@ -368,7 +419,7 @@ def _build_reason(e: MarketHeatEntry) -> str:
     return ", ".join(parts) if parts else ""
 
 
-def _log_state_change(question: str, old: str, new: str, score: int, source: str):
+def _log_state_change(question: str, old: str, new: str, score: int, source: str) -> None:
     label = question[:40] if question else "unknown"
     print(f"\n🌡️ [热度·{source}] {label} | {old} → {new} (score={score})")
 

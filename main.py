@@ -714,8 +714,14 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
             result["error"] = f"前三档深度不足以支撑最小奖励挂单量 {base_min_size:.0f} shares，跳过"
             return result
 
-        # 🌡️ 热度缩单：WARM=0.5x, HOT=0.15x（FROZEN 已在 run_auto_place_orders 拦截）
-        heat_state = token_info.get("_heat_state", "SAFE")
+        # 🌡️ 热度缩单：WARM=0.5x, HOT=0.15x
+        # 🔒 重新查询热度状态（防止 run_auto_place_orders snapshot 后被防御触发升级为 FROZEN）
+        heat_state, heat_score, _heat_reason = market_heat.tracker.get_heat_state(token_id)
+        if heat_state == "FROZEN":
+            result["buy_status"] = "heat_frozen"
+            result["sell_status"] = "heat_frozen"
+            result["error"] = f"热度 FROZEN (score={heat_score})，跳过"
+            return result
         heat_multiplier = market_heat.HEAT_SIZE_MULTIPLIER.get(heat_state, 1.0)
         if heat_multiplier < 1.0:
             original_size = order_size
@@ -2108,7 +2114,7 @@ async def market_ws_loop():
 
 HEAT_DECAY_INTERVAL = 1800  # 热度衰减检查间隔（秒，30 分钟）
 
-async def heat_decay_task():
+async def heat_decay_task() -> None:
     """每 30 分钟：同步 reward_monitor 写入的 reward_shock + 清理过期热度状态"""
     print(f"🌡️ [热度衰减] 任务已启动（每 {HEAT_DECAY_INTERVAL}s 检查）")
     while True:
@@ -2124,6 +2130,7 @@ async def heat_decay_task():
                     print(f"   {s['state']:6s} score={s['score']:3d} | {s['question']} | {s['reason']}")
         except Exception as e:
             print(f"⚠️ [热度衰减] 异常: {e}")
+            traceback.print_exc()
 
 
 async def auto_place_and_monitor():
