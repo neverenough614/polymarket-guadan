@@ -10,6 +10,12 @@
   - 退出慢（FROZEN 有强制冷却期，依触发强度 6-24h）
   - 与 vol_factor 独立：vol_factor 管"历史波动缩单"，heat_multiplier 管"实时危险降仓"
   - JSON 持久化：重启后热度状态不丢失
+
+reward_shock 的用法（重要）:
+  - 单独 reward_shock 不触发任何降级 —— 新市场刚加奖励是"机会"，不是风险
+  - 仅当市场已经有防御触发（有人在吃单）时，reward_shock 才会叠加 +30 分
+  - 这种组合代表"高波动 + 高关注"，才是真实危险信号
+  - reward_monitor.py 抢奖励的业务逻辑不受影响
 """
 
 import json
@@ -153,8 +159,14 @@ class MarketHeatTracker:
         n = min(len(e.defense_trigger_times), DEFENSE_TRIGGER_MAX_COUNT)
         score = n * DEFENSE_TRIGGER_SCORE
 
-        # 2. Reward shock（12h 内有效）
-        if e.reward_shock_time and (now - e.reward_shock_time) < REWARD_SHOCK_DECAY_SECS:
+        # 2. Reward shock（组合信号）：仅在已有防御触发时才加分
+        # 单独的新奖励事件是"机会"（抢先挂单吃新 sponsor），不是风险
+        # 只有当市场已经在被吃单（有防御触发）+ 刚加奖励时，才构成"高波动+高关注"的真实风险
+        if (
+            n >= 1
+            and e.reward_shock_time
+            and (now - e.reward_shock_time) < REWARD_SHOCK_DECAY_SECS
+        ):
             score += REWARD_SHOCK_SCORE
 
         return min(score, 100)
