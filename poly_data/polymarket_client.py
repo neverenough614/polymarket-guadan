@@ -180,15 +180,30 @@ class PolymarketClient:
         """
         return self.get_usdc_balance() + self.get_pos_balance()
 
-    def get_all_positions(self):
+    def get_all_positions(self) -> pd.DataFrame:
         """
         Get all positions for the connected wallet across all markets.
-        
+
+        API 返回形式：
+          - 正常：list[dict]（多仓位）或 dict（单仓位）
+          - 错误：dict 含 "error" / "message" 字段
+
         Returns:
-            DataFrame: All positions with details like market, size, avgPrice
+            DataFrame: 持仓表。若 API 请求失败或返回错误响应，抛出异常而非
+                       返回"看似正常"的 DataFrame，避免下游把错误当作"零持仓"
+                       静默跳过清仓逻辑。
         """
-        res = requests.get(f'https://data-api.polymarket.com/positions?user={self.browser_wallet}')
-        return pd.DataFrame(res.json())
+        res = requests.get(
+            f'https://data-api.polymarket.com/positions?user={self.browser_wallet}',
+            timeout=10,
+        )
+        res.raise_for_status()
+        data = res.json()
+        if isinstance(data, dict):
+            if "error" in data or "message" in data:
+                raise RuntimeError(f"Polymarket positions API returned error: {data}")
+            data = [data]  # 单仓位也是合法 dict
+        return pd.DataFrame(data)
     
     def get_raw_position(self, tokenId):
         """
