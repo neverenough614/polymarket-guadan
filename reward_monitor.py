@@ -766,11 +766,13 @@ def monitor_rewards():
                     print(f"   金额: {parsed['amount_usdc']:.2f} USDC.e")
                     print(f"{'='*60}")
 
-                # 🌡️ 记录热度事件（reward_shock）→ 写入 market_heat_state.json
+                # 🌡️ 记录热度事件（reward_shock）→ 追加到事件日志（供 main.py 消费）
+                # 注意：这里只追加事件日志，不操作 market_heat_state.json
+                # main.py 是唯一拥有状态文件的进程，避免跨进程覆盖
                 _heat_question = market_info.get("question", "")
                 for _heat_tid in (market_info.get("token1", ""), market_info.get("token2", "")):
                     if _heat_tid and len(_heat_tid) > 10:
-                        market_heat.tracker.record_reward_shock(_heat_tid, question=_heat_question)
+                        market_heat.append_shock_event(_heat_tid, question=_heat_question)
 
                 # 写入 Google 表格（金额 >= 100 USDC 时）
                 write_to_new_rewards_sheet(parsed, market_info)

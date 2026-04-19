@@ -2112,24 +2112,36 @@ async def market_ws_loop():
         await asyncio.sleep(5)
 
 
-HEAT_DECAY_INTERVAL = 1800  # 热度衰减检查间隔（秒，30 分钟）
+HEAT_CONSUME_INTERVAL = 300   # shock 事件消费间隔（秒，5 分钟）
+HEAT_DECAY_INTERVAL   = 1800  # 衰减 + 概览打印间隔（秒，30 分钟）
 
 async def heat_decay_task() -> None:
-    """每 30 分钟：同步 reward_monitor 写入的 reward_shock + 清理过期热度状态"""
-    print(f"🌡️ [热度衰减] 任务已启动（每 {HEAT_DECAY_INTERVAL}s 检查）")
+    """
+    热度系统后台维护任务：
+      - 每 5 分钟消费 reward_monitor 写入的 shock 事件日志
+      - 每 30 分钟跑一次 decay_all（处理 FROZEN 冷却到期 + 清理 stale）并打印概览
+    """
+    print(f"🌡️ [热度维护] 任务已启动（shock 消费每 {HEAT_CONSUME_INTERVAL}s，衰减每 {HEAT_DECAY_INTERVAL}s）")
+    loop_count = 0
+    decay_every_n = HEAT_DECAY_INTERVAL // HEAT_CONSUME_INTERVAL  # 6
     while True:
-        await asyncio.sleep(HEAT_DECAY_INTERVAL)
+        await asyncio.sleep(HEAT_CONSUME_INTERVAL)
+        loop_count += 1
         try:
-            market_heat.tracker.sync_from_disk()
-            market_heat.tracker.decay_all()
-            summary = market_heat.tracker.get_all_states_summary()
-            if summary:
-                ts = datetime.now().strftime("%H:%M:%S")
-                print(f"\n🌡️ [{ts}] 热度概览: {len(summary)} 个非 SAFE 市场")
-                for s in summary[:10]:
-                    print(f"   {s['state']:6s} score={s['score']:3d} | {s['question']} | {s['reason']}")
+            # 每轮都消费 shock 日志（高频，保持状态新鲜）
+            market_heat.tracker.consume_shock_log()
+
+            # 每 N 轮做一次 decay + 概览
+            if loop_count % decay_every_n == 0:
+                market_heat.tracker.decay_all()
+                summary = market_heat.tracker.get_all_states_summary()
+                if summary:
+                    ts = datetime.now().strftime("%H:%M:%S")
+                    print(f"\n🌡️ [{ts}] 热度概览: {len(summary)} 个非 SAFE 市场")
+                    for s in summary[:10]:
+                        print(f"   {s['state']:6s} score={s['score']:3d} | {s['question']} | {s['reason']}")
         except Exception as e:
-            print(f"⚠️ [热度衰减] 异常: {e}")
+            print(f"⚠️ [热度维护] 异常: {e}")
             traceback.print_exc()
 
 

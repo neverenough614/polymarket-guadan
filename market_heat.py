@@ -62,6 +62,11 @@ FROZEN_COOLDOWN_MAP = {
 # ── 持久化文件 ──
 DEFAULT_STATE_FILE = "market_heat_state.json"
 
+# ── 跨进程事件日志（reward_monitor → main）──
+# reward_monitor.py 追加写入 jsonl 格式的 reward_shock 事件
+# main.py 的 heat_decay_task 周期性 consume_shock_log() 消费并清空
+DEFAULT_SHOCK_LOG_FILE = "reward_shock_events.jsonl"
+
 
 # ======================================================
 # 数据结构
@@ -268,11 +273,22 @@ class MarketHeatTracker:
             if old != new:
                 _log_state_change(e.question, old, new, score, "防御触发")
 
-    def record_reward_shock(self, token_id: str, question: str = "") -> None:
-        """链上检测到新 sponsor/reward 事件时调用"""
+    def record_reward_shock(
+        self,
+        token_id: str,
+        question: str = "",
+        timestamp: Optional[float] = None,
+    ) -> None:
+        """
+        链上检测到新 sponsor/reward 事件时调用。
+        timestamp: 事件发生时间戳（用于从事件日志批量消费）。None 则取当前时间。
+        """
+        shock_time = timestamp if timestamp is not None else time.time()
         with self._lock:
             e = self._get_or_create(token_id, question)
-            e.reward_shock_time = time.time()
+            # 事件日志可能乱序：只保留较新的 shock 时间
+            if e.reward_shock_time is None or shock_time > e.reward_shock_time:
+                e.reward_shock_time = shock_time
             score = self._refresh_score(e)
             old, new = self._apply_state_change(e, score)
             self._save()
@@ -307,40 +323,74 @@ class MarketHeatTracker:
         state, _, _ = self.get_heat_state(token_id)
         return state in ("WARM", "HOT")
 
-    # ── 公开接口：跨进程同步 ────────────────────────────
+    # ── 公开接口：跨进程事件消费 ────────────────────────
 
-    def sync_from_disk(self) -> None:
+    def consume_shock_log(self, log_path: str = DEFAULT_SHOCK_LOG_FILE) -> int:
         """
-        从 JSON 文件合并外部进程写入的 reward_shock 更新。
-        - 已存在的 token: 只取较新的 reward_shock_time 合并，不动防御触发数据
-        - 新 token: 只构造最小 entry（reward_shock + question），不导入可能过期的
-          防御触发数据（防御数据只信任主进程 main.py 实时写入）
+        消费 reward_monitor.py 追加写入的 shock 事件日志。
+
+        流程：
+          1. 原子 rename 日志文件为 .processing，reward_monitor 后续追加会写到新文件
+          2. 读取 processing 文件每行 JSON
+          3. 每个事件调用 record_reward_shock（使用事件自带的时间戳）
+          4. 删除 processing 文件
+
+        返回消费的事件数量。这个方法是 main.py 唯一从外部获取 reward_shock 的入口，
+        避免 reward_monitor 直接操作 market_heat_state.json 造成状态覆盖。
         """
-        raw = self._read_disk()
-        if not raw:
-            return
-        with self._lock:
-            merged = 0
-            for token_id, d in raw.items():
-                disk_shock = d.get("reward_shock_time")
-                if not disk_shock:
-                    continue
-                if token_id in self._entries:
-                    mem_shock = self._entries[token_id].reward_shock_time
-                    if mem_shock is None or disk_shock > mem_shock:
-                        self._entries[token_id].reward_shock_time = disk_shock
-                        if d.get("question"):
-                            self._entries[token_id].question = d["question"]
-                        merged += 1
-                else:
-                    # 新 token：只带 reward_shock 和 question，不导入防御触发数据
-                    e = MarketHeatEntry()
-                    e.reward_shock_time = disk_shock
-                    e.question = d.get("question", "")
-                    self._entries[token_id] = e
-                    merged += 1
-            if merged > 0:
-                print(f"🌡️ [热度·同步] 从磁盘合并了 {merged} 个 reward_shock 更新")
+        log_file = Path(log_path)
+        if not log_file.exists():
+            return 0
+
+        processing_file = log_file.with_suffix(log_file.suffix + ".processing")
+        # 若存在上次未清理的 processing 文件，先合并过来
+        if processing_file.exists():
+            try:
+                with open(processing_file, "a", encoding="utf-8") as dst, \
+                     open(log_file, "r", encoding="utf-8") as src:
+                    dst.write(src.read())
+                log_file.unlink()
+            except OSError as e:
+                print(f"⚠️ [热度·消费] 合并残留 processing 文件失败: {e}")
+                return 0
+        else:
+            try:
+                os.replace(str(log_file), str(processing_file))
+            except OSError as e:
+                print(f"⚠️ [热度·消费] 重命名日志文件失败: {e}")
+                return 0
+
+        count = 0
+        try:
+            with open(processing_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    token_id = event.get("token_id", "")
+                    question = event.get("question", "")
+                    timestamp = event.get("timestamp")
+                    if not token_id or not isinstance(token_id, str):
+                        continue
+                    self.record_reward_shock(token_id, question, timestamp=timestamp)
+                    count += 1
+        except OSError as e:
+            print(f"⚠️ [热度·消费] 读取 processing 文件失败: {e}")
+            return count
+
+        # 成功处理后删除 processing 文件
+        try:
+            processing_file.unlink()
+        except OSError:
+            pass
+
+        if count > 0:
+            print(f"🌡️ [热度·消费] 处理了 {count} 个 reward_shock 事件")
+        return count
 
     # ── 公开接口：定期维护 ──────────────────────────────
 
@@ -422,6 +472,36 @@ def _build_reason(e: MarketHeatEntry) -> str:
 def _log_state_change(question: str, old: str, new: str, score: int, source: str) -> None:
     label = question[:40] if question else "unknown"
     print(f"\n🌡️ [热度·{source}] {label} | {old} → {new} (score={score})")
+
+
+# ======================================================
+# 跨进程事件追加（供 reward_monitor.py 使用）
+# ======================================================
+
+def append_shock_event(
+    token_id: str,
+    question: str = "",
+    log_path: str = DEFAULT_SHOCK_LOG_FILE,
+) -> None:
+    """
+    追加一条 reward_shock 事件到日志文件（JSONL 格式）。
+
+    独立函数，不依赖 tracker 实例，供 reward_monitor.py 等外部进程调用。
+    reward_monitor 不应直接操作 market_heat_state.json，避免状态覆盖。
+    main.py 的 heat_decay_task 会周期性 consume_shock_log() 消费这些事件。
+    """
+    if not token_id or not isinstance(token_id, str):
+        return
+    event = {
+        "token_id":  token_id,
+        "question":  question,
+        "timestamp": time.time(),
+    }
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(f"⚠️ [热度·追加] 写入 shock 事件失败: {e}")
 
 
 # ======================================================
