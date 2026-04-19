@@ -42,11 +42,20 @@ QUESTION_BLACKLIST_KEYWORDS = [
 
 # 硬黑名单：命中关键词的市场完全不挂单（大小写不敏感）
 # 与上面的 QUESTION_BLACKLIST_KEYWORDS（跳过第一档）不同，这里是彻底屏蔽
+# 仅保留"结构性永久危险"的词，动态热点交给 market_heat 系统自动处理
 QUESTION_HARD_BLACKLIST = [
-    # 在这里添加你想完全屏蔽的关键词，每个一行，例如：
-    "NFL",
-    "Iran","Iranian","Israel","Oil","March", "Winner", "Champion", "NBA", "Presidential", "Leader", "Nominee", "Supreme", "Bitcoin", "Democratic", "Trump", "Elon",
-    "Gold", "Mojtaba","Lakers","election","Minister","vs","Spread","win",
+    # 体育单场赛事（价格瞬间跳变）
+    "NFL", "NBA", "Lakers",
+    # 博彩对赌结构（极端赔付）
+    "vs", "Spread",
+    # 赢家通吃型（新闻面极敏感）
+    "Winner", "Champion", "Nominee",
+    # 商品价格（24 小时波动）
+    "Bitcoin", "Gold", "Oil",
+    # 长期选举/最高法院（新闻尾部风险大）
+    "Presidential", "Supreme",
+    # 地缘政治 / 具体人物（暂留 HARD，第二阶段再考虑降级到软黑名单）
+    "Iran", "Iranian", "Israel", "Trump", "Elon", "Democratic",
 ]
 
 DEPTH_THRESHOLD_TIER1   = 1500.0   # 第1档深度阈值（USDC），提高门槛确保只有深厚市场才挂第一档
