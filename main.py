@@ -6,6 +6,7 @@ import signal
 import sys
 import concurrent.futures
 import heapq
+import weakref
 from typing import List, Dict, Optional, Tuple
 from collections import defaultdict, deque
 from datetime import datetime
@@ -20,7 +21,9 @@ from poly_data.polymarket_client import PolymarketClient
 from poly_data.data_utils import update_markets, update_positions, update_orders
 from poly_data.websocket_handlers import connect_market_websocket
 import poly_data.global_state as global_state
+from py_clob_client_v2.clob_types import OrderPayload
 import market_heat
+from reward_efficiency import as_float, estimate_order_reward_per_100
 
 # ======================================================
 # ⚙️ 自动挂单配置
@@ -28,6 +31,7 @@ import market_heat
 STRATEGY_SHEET_NAME      = "Normal LP Strategy"
 AGGRESSIVE_SHEET_NAME    = "High Reward Aggressive"  # 高奖励激进策略（刀口舔血）
 CHAIN_REWARDS_SHEET_NAME = "Chain Rewards Alert"      # 链上奖励自动发现
+SMALL_EDGE_SHEET_NAME    = "Small Edge Strategy"      # 小仓位、高收益效率、低竞争市场
 
 # 关键词黑名单（大小写不敏感，命中则跳过该市场）
 # 主要过滤：军事打击类、政治演讲单日事件、地缘政治占领/封锁类
@@ -78,6 +82,24 @@ AGGRESSIVE_MAX_ORDER_SIZE = 300.0  # High Reward 最大 300 shares
 # Chain Rewards：链上自动发现的高奖励市场
 CHAIN_REWARDS_SIZE_RATIO     = 0.10     # Chain Rewards 占前三档总深度 10%
 CHAIN_REWARDS_MAX_ORDER_SIZE = 1000.0    # Chain Rewards 最大 1000 shares
+SMALL_EDGE_DEFAULT_ORDER_SIZE = 100.0
+SMALL_EDGE_MAX_ORDER_SIZE     = 300.0
+SMALL_EDGE_MIN_LEVEL_DEPTH    = 20.0
+SMALL_EDGE_MIN_TOP5_DEPTH     = 100.0
+SMALL_EDGE_MAX_SPREAD_FRAC    = 0.90
+SMALL_EDGE_MIN_Q_SCORE_RATIO  = 0.05
+PROBE_BATCH_SIZE = 100
+PROBE_OBSERVE_SECONDS = 90
+STABLE_ACTIVE_TARGET = 45
+MAX_ACTIVE_TOKENS = 120
+PROBE_RETRY_COOLDOWN = 300
+TARGET_MONITOR_SCAN_SECONDS = 20.0
+MAX_ACCEPTABLE_MONITOR_SCAN_SECONDS = 30.0
+MONITOR_SCAN_AVG_WINDOW = 3
+MAX_TOTAL_TOKENS_PER_PLACEMENT_RUN = PROBE_BATCH_SIZE
+MAX_SMALL_EDGE_TOKENS_PER_RUN = 80
+PLACE_ORDER_BATCH_SIZE = 30
+PLACE_ORDER_BATCH_DELAY = 5.0
 # 兼容旧代码的默认值
 DYNAMIC_SIZE_RATIO      = 0.10     # 默认（手动挂单等）
 MAX_ORDER_SIZE          = 500.0    # 默认上限
@@ -98,6 +120,9 @@ SPREAD_CHECK_INTERVAL   = 60       # 插队检测间隔（秒）
 MIN_Q_SCORE_RATIO           = 0.04    # ((v-s)/v)^2 < 0.04 即 spread > 80% of max_spread → 奖励≈0，白担风险
 # 预计算：spread > max_spread * 0.8 时 Q score < 0.04，用于热路径快速判断
 MAX_INEFFECTIVE_SPREAD_FRAC = 1.0 - MIN_Q_SCORE_RATIO ** 0.5  # = 0.8
+MIN_REWARD_EFFICIENCY_PER_100 = 0.20
+SMALL_EDGE_MIN_REWARD_EFFICIENCY_PER_100 = 0.50
+REWARD_PROGRAM_STATUS_CACHE_TTL = 30.0
 
 # ======================================================
 # ⚙️ 监控防御配置
@@ -112,7 +137,8 @@ MIN_FRONT_DEPTH_ABSOLUTE        = 100.0   # 前墙绝对兜底线（USDC），�
 MIN_FRONT_DEPTH_ABSOLUTE_REF    = 0.0    # 设为0：历史高水位>0永远成立，等于直接启用绝对兜底
 MONITOR_CHECK_INTERVAL          = 1      # 扫描间隔（秒）
 ENABLE_AUTO_DEFENSE             = True
-MAX_CONCURRENT_WORKERS          = 10
+MAX_CONCURRENT_WORKERS          = 16
+MONITOR_MAX_BOOKS_PER_SCAN      = 50
 ORDERBOOK_TIMEOUT               = 5
 
 # ======================================================
@@ -163,6 +189,14 @@ placed_orders_log: deque = deque(maxlen=MAX_PLACED_ORDERS_LOG)
 placed_orders_log_lock = threading.Lock()
 pending_retry_tokens: List[Dict] = []
 pending_retry_lock = threading.Lock()
+probe_cooldown_until: Dict[str, float] = {}
+probe_cooldown_lock = threading.Lock()
+probed_small_edge_ids: set = set()
+probed_small_edge_lock = threading.Lock()
+monitor_scan_durations: deque = deque(maxlen=MONITOR_SCAN_AVG_WINDOW)
+monitor_scan_durations_lock = threading.Lock()
+reward_program_status_cache = weakref.WeakKeyDictionary()
+reward_program_status_cache_lock = threading.Lock()
 # 清仓锁：正在清仓的 token 不允许被重试队列重挂（防止"边清边买"死循环）
 closing_tokens: set = set()
 closing_tokens_lock = threading.Lock()
@@ -294,6 +328,8 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
     neg_risk_col   = find_col(df, 'neg_risk')
     max_spread_col = find_col(df, 'max_spread')
     vol_col        = find_col(df, 'volatility_sum')
+    order_size_col = find_col(df, 'small_edge_order_size') or find_col(df, 'order_size')
+    reward_rate_col = find_col(df, 'rewards_daily_rate')
 
     added = 0
     skipped_blacklist = 0
@@ -354,11 +390,26 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
             except (ValueError, TypeError):
                 vol_sum = 0.0
 
+        order_size = None
+        if order_size_col:
+            try:
+                raw_order_size = float(str(row.get(order_size_col, '')).replace(',', ''))
+                if raw_order_size > 0:
+                    order_size = raw_order_size
+            except (ValueError, TypeError):
+                order_size = None
+
+        rewards_daily_rate = 0.0
+        if reward_rate_col:
+            try:
+                rewards_daily_rate = float(str(row.get(reward_rate_col, 0)).replace(',', ''))
+            except (ValueError, TypeError):
+                rewards_daily_rate = 0.0
+
         def add_token(token_id, token_type):
             nonlocal added
             if token_id not in seen_token_ids:
-                seen_token_ids[token_id] = len(tokens)
-                tokens.append({
+                token = {
                     "token_id":       token_id,
                     "token_type":     token_type,
                     "question":       question,
@@ -368,7 +419,13 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
                     "volatility_sum": vol_sum,
                     "source":         source_label,
                     "blacklisted":    is_blacklisted,
-                })
+                }
+                if order_size is not None:
+                    token["small_edge_order_size"] = order_size
+                if rewards_daily_rate > 0:
+                    token["rewards_daily_rate"] = rewards_daily_rate
+                seen_token_ids[token_id] = len(tokens)
+                tokens.append(token)
                 added += 1
             else:
                 # 已存在：取较大的 min_size，更新 max_spread（如果新值不为 None）
@@ -376,6 +433,10 @@ def _parse_sheet_tokens(df: pd.DataFrame, source_label: str,
                 tokens[idx]["min_size"] = max(tokens[idx]["min_size"], min_size)
                 if max_spread is not None:
                     tokens[idx]["max_spread"] = max_spread
+                if order_size is not None:
+                    tokens[idx]["small_edge_order_size"] = order_size
+                if rewards_daily_rate > 0:
+                    tokens[idx]["rewards_daily_rate"] = rewards_daily_rate
 
         t1 = str(row.get('token1', '')).strip()
         if t1 and len(t1) > 10 and t1.lower() != 'nan':
@@ -448,11 +509,26 @@ def load_strategy_markets() -> List[Dict]:
         except Exception as e:
             print(f"   ⚠️ 读取 '{CHAIN_REWARDS_SHEET_NAME}' 失败（可能尚未创建）: {e}")
 
+        # ── 4. Small Edge Strategy（小仓位高效率）──────
+        print(f"   📋 读取 '{SMALL_EDGE_SHEET_NAME}' ...")
+        try:
+            wk4 = sh.worksheet(SMALL_EDGE_SHEET_NAME)
+            df4 = pd.DataFrame(wk4.get_all_records())
+            if not df4.empty:
+                n4 = _parse_sheet_tokens(df4, "Small Edge", tokens, seen_token_ids,
+                                          max_spread_unit_cents=True)
+                print(f"   ✅ '{SMALL_EDGE_SHEET_NAME}': {len(df4)} 行 → {n4} 个新 token")
+            else:
+                print(f"   ⚠️ '{SMALL_EDGE_SHEET_NAME}' 表格为空")
+        except Exception as e:
+            print(f"   ⚠️ 读取 '{SMALL_EDGE_SHEET_NAME}' 失败（可能尚未创建）: {e}")
+
         # 统计各策略来源
         normal_count = sum(1 for t in tokens if t.get("source") == "Normal LP")
         aggressive_count = sum(1 for t in tokens if t.get("source") == "High Reward")
         chain_count = sum(1 for t in tokens if t.get("source") == "Chain Rewards")
-        print(f"   ✅ 合并后共 {len(tokens)} 个 token（Normal LP: {normal_count}, High Reward: {aggressive_count}, Chain Rewards: {chain_count}）")
+        small_edge_count = sum(1 for t in tokens if t.get("source") == "Small Edge")
+        print(f"   ✅ 合并后共 {len(tokens)} 个 token（Normal LP: {normal_count}, High Reward: {aggressive_count}, Chain Rewards: {chain_count}, Small Edge: {small_edge_count}）")
         print(f"{'='*60}\n")
         return tokens
 
@@ -507,6 +583,135 @@ def calculate_q_score_ratio(spread: float, max_spread: float) -> float:
         return 0.0  # 超出范围，Q = 0
     ratio = (max_spread - spread) / max_spread
     return ratio * ratio  # 二次方衰减
+
+
+def _normalize_reward_max_spread(raw_value) -> float:
+    value = as_float(raw_value)
+    if value > 1.0:
+        return value / 100.0
+    return value
+
+
+def _sum_rewards_daily_rate(rates) -> float:
+    total = 0.0
+    for rate in rates or []:
+        if isinstance(rate, dict):
+            total += (
+                as_float(rate.get("rewards_daily_rate"))
+                or as_float(rate.get("daily_rate"))
+                or as_float(rate.get("reward_daily_rate"))
+                or as_float(rate.get("amount"))
+            )
+    return total
+
+
+def _market_id_from_book_or_token(token_info: Dict, book=None) -> Optional[str]:
+    market_id = getattr(book, "market", None) if book is not None else None
+    return market_id or token_info.get("market") or token_info.get("condition_id")
+
+
+def get_live_reward_program_status(poly_client: PolymarketClient, token_info: Dict, book=None) -> Dict:
+    market_id = _market_id_from_book_or_token(token_info, book)
+    if not market_id:
+        return {
+            "active": True,
+            "reason": "missing_market_id",
+            "max_spread": token_info.get("max_spread"),
+            "rewards_daily_rate": as_float(token_info.get("rewards_daily_rate")),
+        }
+
+    now = time.time()
+    cache_owner = getattr(poly_client, "client", poly_client)
+    with reward_program_status_cache_lock:
+        owner_cache = reward_program_status_cache.setdefault(cache_owner, {})
+        cached = owner_cache.get(market_id)
+        if cached and now - cached[0] < REWARD_PROGRAM_STATUS_CACHE_TTL:
+            return dict(cached[1])
+
+    try:
+        market = poly_client.client.get_market(market_id)
+    except Exception as e:
+        status = {
+            "active": True,
+            "reason": "reward_program_check_failed",
+            "error": str(e),
+            "max_spread": token_info.get("max_spread"),
+            "rewards_daily_rate": as_float(token_info.get("rewards_daily_rate")),
+        }
+        return status
+
+    rewards = market.get("rewards") if isinstance(market, dict) else None
+    rates = rewards.get("rates") if isinstance(rewards, dict) else []
+    live_max_spread = _normalize_reward_max_spread(rewards.get("max_spread") if isinstance(rewards, dict) else None)
+    live_daily_rate = _sum_rewards_daily_rate(rates)
+
+    active = bool(rates) and live_max_spread > 0
+    status = {
+        "active": active,
+        "reason": "ok" if active else "inactive_reward_program",
+        "max_spread": live_max_spread,
+        "rewards_daily_rate": live_daily_rate,
+        "market_id": market_id,
+    }
+    with reward_program_status_cache_lock:
+        owner_cache = reward_program_status_cache.setdefault(cache_owner, {})
+        owner_cache[market_id] = (now, dict(status))
+    return status
+
+
+def reward_efficiency_check(
+    token_info: Dict,
+    side: str,
+    levels,
+    price: Optional[float],
+    order_size: Optional[float],
+    midpoint: Optional[float],
+    max_spread: Optional[float],
+    rewards_daily_rate: float,
+    threshold: float = MIN_REWARD_EFFICIENCY_PER_100,
+) -> Dict:
+    if price is None or order_size is None or midpoint is None or not max_spread:
+        return {"place": False, "reason": "missing_reward_efficiency_inputs"}
+    estimate = estimate_order_reward_per_100(
+        levels=levels,
+        my_price=price,
+        my_size=order_size,
+        midpoint=midpoint,
+        max_spread=max_spread,
+        rewards_daily_rate=rewards_daily_rate,
+    )
+    expected = as_float(estimate.get("expected_reward_per_100"))
+    return {
+        **estimate,
+        "place": expected >= threshold,
+        "reason": "ok" if expected >= threshold else "low_reward_efficiency",
+        "threshold": threshold,
+    }
+
+
+def get_reward_efficiency_threshold(token_info: Dict) -> float:
+    if token_info.get("source") == "Small Edge":
+        return SMALL_EDGE_MIN_REWARD_EFFICIENCY_PER_100
+    return MIN_REWARD_EFFICIENCY_PER_100
+
+
+def cancel_if_reward_program_inactive(
+    poly_client: PolymarketClient,
+    token_info: Dict,
+    book,
+    my_bid_price: Optional[float],
+    my_ask_price: Optional[float],
+) -> bool:
+    if my_bid_price is None and my_ask_price is None:
+        return False
+    status = get_live_reward_program_status(poly_client, token_info, book)
+    if status.get("active", True):
+        return False
+    token_id = token_info["token_id"]
+    question = token_info.get("question", token_id)
+    print(f"\n[Reward inactive] {question[:45]}... market reward is disabled; cancel orders")
+    poly_client.cancel_all_asset(token_id)
+    return True
 
 
 def analyze_best_place_price_from_book(book, side: str,
@@ -601,6 +806,42 @@ def analyze_best_place_price_from_book(book, side: str,
         return None
 
 
+def analyze_small_edge_place_price_from_book(book, side: str,
+                                             max_spread: Optional[float] = None,
+                                             mid: Optional[float] = None,
+                                             sorted_levels=None):
+    try:
+        if not book or max_spread is None or mid is None:
+            return None
+        if sorted_levels is not None:
+            levels = sorted_levels
+        elif side == "BUY":
+            levels = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
+        else:
+            levels = sorted(book.asks, key=lambda x: float(x.price), reverse=False)
+        if not levels:
+            return None
+
+        top5_total_depth = sum(float(lv.price) * float(lv.size) for lv in levels[:5])
+        if top5_total_depth < SMALL_EDGE_MIN_TOP5_DEPTH:
+            return None
+
+        for i, level in enumerate(levels[:4]):
+            price = float(level.price)
+            depth = price * float(level.size)
+            if depth < SMALL_EDGE_MIN_LEVEL_DEPTH:
+                continue
+            if abs(price - mid) > max_spread * SMALL_EDGE_MAX_SPREAD_FRAC:
+                continue
+            if calculate_q_score_ratio(abs(price - mid), max_spread) < SMALL_EDGE_MIN_Q_SCORE_RATIO:
+                continue
+            return price, i + 1, depth
+        return None
+    except Exception as e:
+        print(f"   ⚠️ Small Edge 分析订单簿失败: {e}")
+        return None
+
+
 def is_extreme_price_market(best_bid: Optional[float]) -> bool:
     if best_bid is None:
         return False
@@ -666,6 +907,14 @@ def calculate_dynamic_size(book, mid: Optional[float], min_size: float,
         return None
 
 
+def calculate_small_edge_size(token_info: Dict, base_min_size: float) -> Optional[float]:
+    if base_min_size > SMALL_EDGE_MAX_ORDER_SIZE:
+        return None
+    configured = as_float(token_info.get("small_edge_order_size") or token_info.get("order_size"))
+    target = configured if configured > 0 else SMALL_EDGE_DEFAULT_ORDER_SIZE
+    return float(min(SMALL_EDGE_MAX_ORDER_SIZE, max(base_min_size, round(target))))
+
+
 # ======================================================
 # 🚀 对单个 token 执行挂单
 # ======================================================
@@ -701,21 +950,39 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
         book, best_bid, best_ask, mid, sorted_bids, sorted_asks = get_orderbook_info(poly_client, token_id)
         result["mid"] = mid
 
+        reward_status = get_live_reward_program_status(poly_client, token_info, book)
+        if not reward_status.get("active", True):
+            result["buy_status"] = "reward_program_inactive"
+            result["sell_status"] = "reward_program_inactive"
+            result["error"] = "CLOB reward program inactive"
+            return result
+        live_max_spread = reward_status.get("max_spread")
+        if live_max_spread:
+            max_spread = live_max_spread
+            result["max_spread"] = max_spread
+        rewards_daily_rate = (
+            as_float(token_info.get("rewards_daily_rate"))
+            or as_float(reward_status.get("rewards_daily_rate"))
+        )
+
         # 🔥 动态计算挂单量（基于前三档总深度 + 波动率加权）
         # 根据策略来源使用不同的占比和上限
         source = token_info.get("source", "Normal LP")
         vol_sum = token_info.get("volatility_sum", 0.0)
-        if source == "High Reward":
-            sr, mos = AGGRESSIVE_SIZE_RATIO, AGGRESSIVE_MAX_ORDER_SIZE
-        elif source == "Normal LP":
-            sr, mos = NORMAL_SIZE_RATIO, NORMAL_MAX_ORDER_SIZE
-        elif source == "Chain Rewards":
-            sr, mos = CHAIN_REWARDS_SIZE_RATIO, CHAIN_REWARDS_MAX_ORDER_SIZE
+        if source == "Small Edge":
+            order_size = calculate_small_edge_size(token_info, base_min_size)
         else:
-            sr, mos = DYNAMIC_SIZE_RATIO, MAX_ORDER_SIZE
-        order_size = calculate_dynamic_size(book, mid, base_min_size, volatility_sum=vol_sum,
-                                            size_ratio=sr, max_order_size=mos,
-                                            sorted_bids=sorted_bids, sorted_asks=sorted_asks)
+            if source == "High Reward":
+                sr, mos = AGGRESSIVE_SIZE_RATIO, AGGRESSIVE_MAX_ORDER_SIZE
+            elif source == "Normal LP":
+                sr, mos = NORMAL_SIZE_RATIO, NORMAL_MAX_ORDER_SIZE
+            elif source == "Chain Rewards":
+                sr, mos = CHAIN_REWARDS_SIZE_RATIO, CHAIN_REWARDS_MAX_ORDER_SIZE
+            else:
+                sr, mos = DYNAMIC_SIZE_RATIO, MAX_ORDER_SIZE
+            order_size = calculate_dynamic_size(book, mid, base_min_size, volatility_sum=vol_sum,
+                                                size_ratio=sr, max_order_size=mos,
+                                                sorted_bids=sorted_bids, sorted_asks=sorted_asks)
         result["order_size"] = order_size
         if order_size is None:
             result["buy_status"] = "depth_insufficient"
@@ -751,8 +1018,16 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
         # 🌡️ WARM/HOT 状态也跳过第一档
         blacklisted = token_info.get("blacklisted", False)
         skip_t1 = blacklisted or FORCE_SKIP_TIER1 or heat_state in ("WARM", "HOT")
-        buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_bids)
-        sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_asks)
+        if source == "Small Edge":
+            buy_result = analyze_small_edge_place_price_from_book(
+                book, "BUY", max_spread, mid, sorted_levels=sorted_bids
+            )
+            sell_result = analyze_small_edge_place_price_from_book(
+                book, "SELL", max_spread, mid, sorted_levels=sorted_asks
+            )
+        else:
+            buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_bids)
+            sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_asks)
 
         if extreme:
             # 极端价格市场：必须买卖双向都满足深度条件，否则整个跳过
@@ -770,11 +1045,19 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
             buy_price, buy_tier, _ = buy_result
             result["buy_price"] = buy_price
             result["buy_tier"] = buy_tier
-            try:
-                resp = poly_client.create_order(token_id, "BUY", buy_price, order_size, neg_risk=neg_risk)
-                result["buy_status"] = "placed" if resp and resp.get('status') != 'error' else f"failed: {str(resp)[:50]}"
-            except Exception as e:
-                result["buy_status"] = f"error: {str(e)[:50]}"
+            buy_eff = reward_efficiency_check(
+                token_info, "BUY", sorted_bids, buy_price, order_size, mid, max_spread, rewards_daily_rate,
+                threshold=get_reward_efficiency_threshold(token_info),
+            )
+            result["buy_reward_efficiency"] = buy_eff
+            if not buy_eff["place"]:
+                result["buy_status"] = f"reward_efficiency_skip: {buy_eff['reason']}"
+            else:
+                try:
+                    resp = poly_client.create_order(token_id, "BUY", buy_price, order_size, neg_risk=neg_risk)
+                    result["buy_status"] = "placed" if resp and resp.get('status') != 'error' else f"failed: {str(resp)[:50]}"
+                except Exception as e:
+                    result["buy_status"] = f"error: {str(e)[:50]}"
         else:
             result["buy_status"] = "depth_insufficient"
 
@@ -783,13 +1066,23 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
             sell_price, sell_tier, _ = sell_result
             result["sell_price"] = sell_price
             result["sell_tier"] = sell_tier
-            try:
-                resp = poly_client.create_order(token_id, "SELL", sell_price, order_size, neg_risk=neg_risk)
-                result["sell_status"] = "placed" if resp and resp.get('status') != 'error' else f"failed: {str(resp)[:50]}"
-            except Exception as e:
-                result["sell_status"] = f"error: {str(e)[:50]}"
+            sell_eff = reward_efficiency_check(
+                token_info, "SELL", sorted_asks, sell_price, order_size, mid, max_spread, rewards_daily_rate,
+                threshold=get_reward_efficiency_threshold(token_info),
+            )
+            result["sell_reward_efficiency"] = sell_eff
+            if not sell_eff["place"]:
+                result["sell_status"] = f"reward_efficiency_skip: {sell_eff['reason']}"
+            else:
+                try:
+                    resp = poly_client.create_order(token_id, "SELL", sell_price, order_size, neg_risk=neg_risk)
+                    result["sell_status"] = "placed" if resp and resp.get('status') != 'error' else f"failed: {str(resp)[:50]}"
+                except Exception as e:
+                    result["sell_status"] = f"error: {str(e)[:50]}"
         else:
             result["sell_status"] = "depth_insufficient"
+
+        return result
 
     except Exception as e:
         result["error"] = str(e)
@@ -827,7 +1120,7 @@ def _cleanup_blacklisted_orders(poly_client: PolymarketClient):
         return
 
     try:
-        orders = poly_client.client.get_orders()
+        orders = poly_client.client.get_open_orders()
         if not orders:
             print("   ✅ 无活跃挂单，无需清理")
             print(f"{'='*60}\n")
@@ -914,7 +1207,164 @@ def _cleanup_blacklisted_orders(poly_client: PolymarketClient):
         print(f"{'='*60}\n")
 
 
-def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
+def _is_small_edge_token(token_info: Dict) -> bool:
+    return token_info.get("source") == "Small Edge"
+
+
+def _small_edge_priority(token_info: Dict) -> Tuple[float, float, float]:
+    return (
+        as_float(token_info.get("small_edge_efficiency"), 0.0),
+        as_float(token_info.get("small_edge_score"), 0.0),
+        as_float(token_info.get("rewards_daily_rate"), 0.0),
+    )
+
+
+def _source_priority(token_info: Dict) -> int:
+    return {
+        "Normal LP": 0,
+        "High Reward": 1,
+        "Chain Rewards": 2,
+        "Small Edge": 3,
+    }.get(token_info.get("source"), 4)
+
+
+def _probe_priority(indexed_token: Tuple[int, Dict]) -> Tuple[int, float, float, float, int]:
+    index, token_info = indexed_token
+    return (
+        _source_priority(token_info),
+        -as_float(token_info.get("small_edge_efficiency"), 0.0),
+        -as_float(token_info.get("small_edge_score"), 0.0),
+        -as_float(token_info.get("rewards_daily_rate"), 0.0),
+        index,
+    )
+
+
+def record_monitor_scan_duration(seconds: float) -> None:
+    with monitor_scan_durations_lock:
+        monitor_scan_durations.append(float(seconds))
+
+
+def get_average_monitor_scan_seconds() -> Optional[float]:
+    with monitor_scan_durations_lock:
+        if not monitor_scan_durations:
+            return None
+        return sum(monitor_scan_durations) / len(monitor_scan_durations)
+
+
+def calculate_probe_batch_limit(active_count: int, avg_scan_seconds: Optional[float]) -> int:
+    if active_count >= MAX_ACTIVE_TOKENS:
+        return 0
+
+    slots = max(0, MAX_ACTIVE_TOKENS - active_count)
+    if slots <= 0:
+        return 0
+
+    if avg_scan_seconds is None or avg_scan_seconds <= TARGET_MONITOR_SCAN_SECONDS:
+        return min(PROBE_BATCH_SIZE, slots)
+
+    if avg_scan_seconds <= MAX_ACCEPTABLE_MONITOR_SCAN_SECONDS:
+        if active_count >= STABLE_ACTIVE_TARGET:
+            return 0
+        warm_slots = max(0, STABLE_ACTIVE_TARGET - active_count)
+        return min(max(1, PROBE_BATCH_SIZE // 2), slots, warm_slots)
+
+    return 0
+
+
+def limit_tokens_for_placement(
+    strategy_tokens: List[Dict],
+    max_total_tokens: Optional[int] = None,
+    max_small_edge_tokens: Optional[int] = None,
+) -> List[Dict]:
+    if not strategy_tokens:
+        return []
+
+    max_total = int(MAX_TOTAL_TOKENS_PER_PLACEMENT_RUN if max_total_tokens is None else max_total_tokens)
+    max_small_edge = int(MAX_SMALL_EDGE_TOKENS_PER_RUN if max_small_edge_tokens is None else max_small_edge_tokens)
+
+    non_small = [t for t in strategy_tokens if not _is_small_edge_token(t)]
+    small_edge = sorted(
+        (t for t in strategy_tokens if _is_small_edge_token(t)),
+        key=_small_edge_priority,
+        reverse=True,
+    )
+
+    if max_total <= 0:
+        total_slots = len(strategy_tokens)
+    else:
+        total_slots = max_total
+
+    selected = non_small[:total_slots]
+    remaining_slots = max(0, total_slots - len(selected))
+    small_slots = remaining_slots if max_small_edge <= 0 else min(max_small_edge, remaining_slots)
+    selected.extend(small_edge[:small_slots])
+    return selected
+
+
+def select_probe_batch_tokens(
+    strategy_tokens: List[Dict],
+    active_token_ids: set,
+    cooldown_until: Dict[str, float],
+    now: float,
+    avg_scan_seconds: Optional[float] = None,
+    probed_token_ids: Optional[set] = None,
+) -> List[Dict]:
+    active_count = len(active_token_ids)
+    take = calculate_probe_batch_limit(active_count, avg_scan_seconds)
+    if take <= 0:
+        return []
+
+    probed_token_ids = probed_token_ids or set()
+    available = []
+    for index, token_info in enumerate(strategy_tokens):
+        if not _is_small_edge_token(token_info):
+            continue
+        token_id = token_info.get("token_id")
+        if not token_id or token_id in active_token_ids:
+            continue
+        if cooldown_until.get(token_id, 0.0) > now:
+            continue
+        available.append((index, token_info))
+
+    candidates = [(index, token_info) for index, token_info in available if token_info.get("token_id") not in probed_token_ids]
+    if not candidates:
+        candidates = available
+    candidates.sort(key=_probe_priority)
+    return [token_info for _, token_info in candidates[:max(0, int(take))]]
+
+
+def select_monitor_targets_for_scan(active_targets: List[Dict], scan_count: int) -> List[Dict]:
+    if len(active_targets) <= MONITOR_MAX_BOOKS_PER_SCAN:
+        return active_targets
+
+    max_books = max(1, int(MONITOR_MAX_BOOKS_PER_SCAN))
+    priority = [t for t in active_targets if not _is_small_edge_token(t)]
+    small_edge = [t for t in active_targets if _is_small_edge_token(t)]
+
+    if len(priority) >= max_books:
+        start = ((max(1, scan_count) - 1) * max_books) % len(priority)
+        return (priority + priority)[start:start + max_books]
+
+    slots = max_books - len(priority)
+    if not small_edge or slots <= 0:
+        return priority[:max_books]
+
+    start = ((max(1, scan_count) - 1) * slots) % len(small_edge)
+    selected_small = (small_edge + small_edge)[start:start + slots]
+    return priority + selected_small
+
+
+def split_primary_and_small_edge_tokens(strategy_tokens: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    primary = [t for t in strategy_tokens if not _is_small_edge_token(t)]
+    small_edge = [t for t in strategy_tokens if _is_small_edge_token(t)]
+    return primary, small_edge
+
+
+def run_auto_place_orders(
+    strategy_tokens: List[Dict],
+    max_total_tokens: Optional[int] = None,
+    max_small_edge_tokens: Optional[int] = None,
+) -> Tuple[int, int]:
     global pending_retry_tokens
 
     poly_client = global_state.client
@@ -949,6 +1399,18 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
     if frozen_count > 0:
         print(f"   🌡️ 热度冻结过滤: {frozen_count} 个市场跳过")
     strategy_tokens = heat_filtered
+    before_limit_count = len(strategy_tokens)
+    strategy_tokens = limit_tokens_for_placement(
+        strategy_tokens,
+        max_total_tokens=max_total_tokens,
+        max_small_edge_tokens=max_small_edge_tokens,
+    )
+    if len(strategy_tokens) < before_limit_count:
+        small_selected = sum(1 for t in strategy_tokens if _is_small_edge_token(t))
+        print(
+            f"   🚦 挂单限流: {before_limit_count} -> {len(strategy_tokens)} 个 token"
+            f" (Small Edge {small_selected}/{MAX_SMALL_EDGE_TOKENS_PER_RUN})"
+        )
 
     print(f"\n{'='*60}")
     print(f"🔍 [自动挂单] 并发分析 {len(strategy_tokens)} 个 token（{PLACE_ORDER_WORKERS} 线程）...")
@@ -962,21 +1424,31 @@ def run_auto_place_orders(strategy_tokens: List[Dict]) -> Tuple[int, int]:
         return token_info["token_id"], result
 
     # 并发执行挂单
-    with concurrent.futures.ThreadPoolExecutor(max_workers=PLACE_ORDER_WORKERS) as executor:
-        futures = {executor.submit(_place_one, t): t for t in strategy_tokens}
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                token_id, result = future.result()
-                results_map[token_id] = result
-            except Exception as e:
-                token_info = futures[future]
-                results_map[token_info["token_id"]] = {
-                    "token_id": token_info["token_id"],
-                    "token_type": token_info["token_type"],
-                    "question": token_info["question"],
-                    "buy_status": "error", "sell_status": "error",
-                    "error": str(e), "timestamp": datetime.now().strftime("%H:%M:%S"),
-                }
+    for batch_start in range(0, len(strategy_tokens), PLACE_ORDER_BATCH_SIZE):
+        batch = strategy_tokens[batch_start:batch_start + PLACE_ORDER_BATCH_SIZE]
+        batch_no = batch_start // PLACE_ORDER_BATCH_SIZE + 1
+        batch_total = (len(strategy_tokens) + PLACE_ORDER_BATCH_SIZE - 1) // PLACE_ORDER_BATCH_SIZE
+        if batch_total > 1:
+            print(f"   🚦 挂单批次 {batch_no}/{batch_total}: {len(batch)} 个 token")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=PLACE_ORDER_WORKERS) as executor:
+            futures = {executor.submit(_place_one, t): t for t in batch}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    token_id, result = future.result()
+                    results_map[token_id] = result
+                except Exception as e:
+                    token_info = futures[future]
+                    results_map[token_info["token_id"]] = {
+                        "token_id": token_info["token_id"],
+                        "token_type": token_info["token_type"],
+                        "question": token_info["question"],
+                        "buy_status": "error", "sell_status": "error",
+                        "error": str(e), "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    }
+
+        if batch_start + PLACE_ORDER_BATCH_SIZE < len(strategy_tokens):
+            time.sleep(PLACE_ORDER_BATCH_DELAY)
 
     # 按原始顺序打印结果
     success_count = 0
@@ -1073,6 +1545,147 @@ async def periodic_retry_task():
             continue
         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔄 [重试] 开始重试 {len(ready)} 个 token...")
         await asyncio.to_thread(run_auto_place_orders, ready)
+async def probe_batch_orders_task(strategy_tokens: list):
+    while True:
+        try:
+            poly_client = global_state.client
+            if not poly_client:
+                await asyncio.sleep(5)
+                continue
+
+            all_orders = await asyncio.to_thread(get_all_my_orders_cached, poly_client, 2.0)
+            active_token_ids = {token_id for token_id, sides in all_orders.items() if sides != (None, None)}
+            active_count = len(active_token_ids)
+            now = time.time()
+            avg_scan_seconds = get_average_monitor_scan_seconds()
+
+            with probe_cooldown_lock:
+                cooldown_snapshot = dict(probe_cooldown_until)
+            all_small_edge_ids = {
+                token_info["token_id"]
+                for token_info in strategy_tokens
+                if token_info.get("token_id") and _is_small_edge_token(token_info)
+            }
+            with probed_small_edge_lock:
+                if all_small_edge_ids and probed_small_edge_ids.issuperset(all_small_edge_ids):
+                    probed_small_edge_ids.clear()
+                probed_snapshot = set(probed_small_edge_ids)
+
+            probe_tokens = select_probe_batch_tokens(
+                list(strategy_tokens),
+                active_token_ids=active_token_ids,
+                cooldown_until=cooldown_snapshot,
+                now=now,
+                avg_scan_seconds=avg_scan_seconds,
+                probed_token_ids=probed_snapshot,
+            )
+
+            if not probe_tokens:
+                scan_label = "暂无" if avg_scan_seconds is None else f"{avg_scan_seconds:.1f}s"
+                print(
+                    f"\n[{datetime.now().strftime('%H:%M:%S')}] 🧪 [试单] "
+                    f"活跃 {active_count}/{MAX_ACTIVE_TOKENS}，监控均耗 {scan_label}，等待沉淀"
+                )
+                await asyncio.sleep(PROBE_OBSERVE_SECONDS)
+                continue
+
+            with probe_cooldown_lock:
+                retry_after = now + PROBE_RETRY_COOLDOWN
+                for token_info in probe_tokens:
+                    probe_cooldown_until[token_info["token_id"]] = retry_after
+            selected_ids = {token_info["token_id"] for token_info in probe_tokens}
+            with probed_small_edge_lock:
+                probed_small_edge_ids.update(selected_ids)
+
+            source_counts = defaultdict(int)
+            for token_info in probe_tokens:
+                source_counts[token_info.get("source", "unknown")] += 1
+            source_summary = ", ".join(f"{k}:{v}" for k, v in sorted(source_counts.items()))
+            scan_label = "暂无" if avg_scan_seconds is None else f"{avg_scan_seconds:.1f}s"
+            print(
+                f"\n[{datetime.now().strftime('%H:%M:%S')}] 🧪 [试单] "
+                f"活跃 {active_count}/{MAX_ACTIVE_TOKENS}，监控均耗 {scan_label}，"
+                f"开新批 {len(probe_tokens)} 个 token ({source_summary})，"
+                f"观察 {PROBE_OBSERVE_SECONDS}s"
+            )
+            await asyncio.to_thread(
+                run_auto_place_orders,
+                probe_tokens,
+                len(probe_tokens),
+                MAX_SMALL_EDGE_TOKENS_PER_RUN,
+            )
+            await asyncio.sleep(PROBE_OBSERVE_SECONDS)
+        except asyncio.CancelledError:
+            print("\n🧪 [试单] 任务已取消")
+            break
+        except Exception as e:
+            print(f"\n❌ [试单] 运行时错误: {e}")
+            await asyncio.sleep(5)
+
+
+async def refill_active_orders_task(strategy_tokens: list):
+    while True:
+        await asyncio.sleep(REFILL_INTERVAL)
+        try:
+            poly_client = global_state.client
+            if not poly_client:
+                continue
+
+            all_orders = await asyncio.to_thread(get_all_my_orders_cached, poly_client, 2.0)
+            active_token_ids = {token_id for token_id, sides in all_orders.items() if sides != (None, None)}
+            active_count = len(active_token_ids)
+            if active_count >= MIN_ACTIVE_TOKENS_TO_REFILL:
+                continue
+
+            deficit = max(0, TARGET_ACTIVE_TOKENS - active_count)
+            if deficit <= 0:
+                continue
+            attempt_limit = min(
+                REFILL_MAX_ATTEMPTS,
+                max(REFILL_BATCH_SIZE, deficit * REFILL_ATTEMPT_MULTIPLIER),
+            )
+
+            now = time.time()
+            with refill_cooldown_lock:
+                cooldown_snapshot = dict(refill_cooldown_until)
+
+            refill_tokens = select_refill_tokens(
+                list(strategy_tokens),
+                active_token_ids=active_token_ids,
+                cooldown_until=cooldown_snapshot,
+                now=now,
+                limit=attempt_limit,
+            )
+
+            if not refill_tokens:
+                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 💧 [补位] 活跃 {active_count}/{TARGET_ACTIVE_TOKENS}，无可补候选")
+                continue
+
+            with refill_cooldown_lock:
+                retry_after = now + REFILL_TOKEN_COOLDOWN
+                for token_info in refill_tokens:
+                    refill_cooldown_until[token_info["token_id"]] = retry_after
+
+            source_counts = defaultdict(int)
+            for token_info in refill_tokens:
+                source_counts[token_info.get("source", "unknown")] += 1
+            source_summary = ", ".join(f"{k}:{v}" for k, v in sorted(source_counts.items()))
+            print(
+                f"\n[{datetime.now().strftime('%H:%M:%S')}] 💧 [补位] 活跃 {active_count}/{TARGET_ACTIVE_TOKENS}，"
+                f"尝试 {len(refill_tokens)} 个 token ({source_summary})"
+            )
+            await asyncio.to_thread(
+                run_auto_place_orders,
+                refill_tokens,
+                len(refill_tokens),
+                MAX_SMALL_EDGE_TOKENS_PER_RUN,
+            )
+        except asyncio.CancelledError:
+            print("\n💧 [补位] 任务已取消")
+            break
+        except Exception as e:
+            print(f"\n❌ [补位] 运行时错误: {e}")
+            await asyncio.sleep(5)
 
 
 # ======================================================
@@ -1486,7 +2099,7 @@ class MarketState:
 
 def get_all_my_orders_once(poly_client: PolymarketClient):
     try:
-        orders = poly_client.client.get_orders()
+        orders = poly_client.client.get_open_orders()
         grouped = defaultdict(lambda: {'bids': [], 'asks': []})
         for o in orders:
             # 🔥 只处理 LIVE 状态的订单，过滤掉已取消/已成交的历史订单
@@ -1607,7 +2220,7 @@ def cancel_one_side_orders(poly_client: PolymarketClient, token_id: str, side: s
     side_cn = "买单" if side == "BUY" else "卖单"
     print(f"\n🧨 正在撤销 [{question[:30]}] 的{side_cn}...")
     try:
-        orders = poly_client.client.get_orders()
+        orders = poly_client.client.get_open_orders()
         to_cancel = []
         for o in orders:
             if str(o.get("status", "")).upper() != "LIVE":
@@ -1621,7 +2234,7 @@ def cancel_one_side_orders(poly_client: PolymarketClient, token_id: str, side: s
             print(f"   无活跃{side_cn}需要撤销")
             return False
         for oid in to_cancel:
-            poly_client.client.cancel(oid)
+            poly_client.client.cancel_order(OrderPayload(orderID=oid))
         print(f"✅ 已撤销 {len(to_cancel)} 个{side_cn}")
         return True
     except Exception as e:
@@ -1821,10 +2434,11 @@ async def monitor_defense_loop(strategy_tokens: list):
                 await asyncio.sleep(MONITOR_CHECK_INTERVAL)
                 continue
 
-            active_token_ids = [t["token_id"] for t in active_targets]
+            scan_targets = select_monitor_targets_for_scan(active_targets, scan_count)
+            active_token_ids = [t["token_id"] for t in scan_targets]
             all_books = await asyncio.to_thread(get_all_order_books_concurrent, poly_client, active_token_ids)
 
-            for t in active_targets:
+            for t in scan_targets:
                 token_id = t["token_id"]
                 state    = market_states[token_id]
                 my_bid_price, my_ask_price = all_orders.get(token_id, (None, None))
@@ -1835,6 +2449,11 @@ async def monitor_defense_loop(strategy_tokens: list):
                 # 排序一次，后续复用
                 bids_sorted = sorted(book.bids, key=lambda x: float(x.price), reverse=True)
                 asks_sorted = sorted(book.asks, key=lambda x: float(x.price), reverse=False)
+
+                if cancel_if_reward_program_inactive(poly_client, t, book, my_bid_price, my_ask_price):
+                    state.first_run = True
+                    state.reset_high_water()
+                    continue
 
                 # ── 极端价格孤单检测 ──────────────────────────────────
                 best_bid_price = float(bids_sorted[0].price) if bids_sorted else None
@@ -1990,15 +2609,17 @@ async def monitor_defense_loop(strategy_tokens: list):
                     print("!" * 70)
 
             loop_time  = time.time() - loop_start
+            record_monitor_scan_duration(loop_time)
             # 动态监控间隔：活跃 token 越多，间隔越长，降低 API 压力
             active_count = len(active_targets)
+            scanned_count = len(scan_targets)
             if active_count <= 10:
                 dynamic_interval = MONITOR_CHECK_INTERVAL
             elif active_count <= 30:
                 dynamic_interval = MONITOR_CHECK_INTERVAL * 2
             else:
                 dynamic_interval = MONITOR_CHECK_INTERVAL * 3
-            print(f"\r[ {timestamp} ] 🛡️ 扫描 #{scan_count} | 活跃: {active_count}/{len(current_tokens)} | 耗时: {loop_time:.2f}s | 间隔: {dynamic_interval}s", end="", flush=True)
+            print(f"\r[ {timestamp} ] 🛡️ 扫描 #{scan_count} | 活跃: {active_count}/{len(current_tokens)} | 本轮: {scanned_count} | 耗时: {loop_time:.2f}s | 间隔: {dynamic_interval}s", end="", flush=True)
             sleep_time = max(0.1, dynamic_interval - loop_time)
             await asyncio.sleep(sleep_time)
 
@@ -2174,12 +2795,20 @@ async def auto_place_and_monitor():
         print("[AutoPlace] ❌ 未读取到任何市场，退出自动挂单")
         return
 
-    print(f"\n🚀 [自动挂单系统] 开始执行初始挂单...")
-    await asyncio.to_thread(run_auto_place_orders, strategy_tokens)
+    primary_tokens, small_edge_tokens = split_primary_and_small_edge_tokens(strategy_tokens)
+    print(
+        f"\n🧪 [自动挂单系统] 主策略立即挂单 {len(primary_tokens)} 个 token；"
+        f"Small Edge 分批试单 {len(small_edge_tokens)} 个 token"
+    )
+    primary_place_task = asyncio.create_task(
+        asyncio.to_thread(run_auto_place_orders, primary_tokens, len(primary_tokens), 0)
+    )
 
     print(f"\n🛡️  [系统] 启动所有后台任务...")
     await asyncio.gather(
+        primary_place_task,
         periodic_retry_task(),                      # 深度不足重试
+        probe_batch_orders_task(small_edge_tokens), # Small Edge 分批试单 + 观察沉淀
         monitor_defense_loop(strategy_tokens),      # 监控防御
         sheet_sync_task(strategy_tokens),           # 每小时表格同步
         auto_close_positions_task(strategy_tokens), # 自动清仓

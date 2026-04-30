@@ -30,10 +30,10 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
-from py_clob_client.client import ClobClient
-from py_clob_client.headers.headers import create_level_2_headers
-from py_clob_client.clob_types import RequestArgs
-from py_clob_client.constants import POLYGON
+from py_clob_client_v2.client import ClobClient
+from py_clob_client_v2.headers.headers import create_level_2_headers
+from py_clob_client_v2.clob_types import RequestArgs
+from py_clob_client_v2.constants import POLYGON
 
 load_dotenv()
 
@@ -70,7 +70,7 @@ def init_client():
         funder=funder,
         signature_type=2,
     )
-    creds = client.create_or_derive_api_creds()
+    creds = client.create_or_derive_api_key()
     client.set_api_creds(creds=creds)
     # 用 proxy wallet（实际下单地址）而非 browser address 查询奖励
     maker_address = client.get_address()

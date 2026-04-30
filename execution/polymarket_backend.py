@@ -4,6 +4,8 @@ Polymarket Python 实现，封装 PolymarketClient 的调用。
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
+from py_clob_client_v2.clob_types import OrderPayload
+
 from poly_data.polymarket_client import PolymarketClient
 
 from .interface import IExecutionBackend
@@ -44,7 +46,7 @@ class PolymarketBackend(IExecutionBackend):
             if cached_order_ids is not None:
                 to_cancel = cached_order_ids
             else:
-                orders = self._client.client.get_orders()
+                orders = self._client.client.get_open_orders()
                 to_cancel = []
                 for o in orders:
                     if str(o.get("status", "")).upper() != "LIVE":
@@ -57,7 +59,7 @@ class PolymarketBackend(IExecutionBackend):
             if not to_cancel:
                 return False
             for oid in to_cancel:
-                self._client.client.cancel(oid)
+                self._client.client.cancel_order(OrderPayload(orderID=oid))
             return True
         except Exception:
             return False
@@ -73,7 +75,7 @@ class PolymarketBackend(IExecutionBackend):
 
     def get_all_orders(self) -> List[Dict[str, Any]]:
         try:
-            orders = self._client.client.get_orders()
+            orders = self._client.client.get_open_orders()
             return list(orders) if orders else []
         except Exception:
             return []

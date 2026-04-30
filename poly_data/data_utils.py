@@ -2,6 +2,7 @@ import poly_data.global_state as global_state
 from poly_data.utils import get_sheet_df
 import time
 import poly_data.global_state as global_state
+import pandas as pd
 
 #sth here seems to be removing the position
 def update_positions(avgOnly=False):
@@ -150,7 +151,14 @@ def update_markets():
 
     if len(received_df) > 0:
         global_state.df, global_state.params = received_df.copy(), received_params
-    
+
+    if global_state.df is None:
+        print("[Markets] No sheet markets loaded; skipping market state update")
+        global_state.df = pd.DataFrame()
+        return
+    if global_state.df.empty:
+        print("[Markets] Sheet markets are empty; skipping market state update")
+        return
 
     for _, row in global_state.df.iterrows():
         for col in ['token1', 'token2']:

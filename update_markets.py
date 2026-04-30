@@ -51,11 +51,23 @@ AGG_SPREAD_MIN = 0.02
 AGG_SPREAD_MAX = 0.12
 AGG_DAYS_MIN = 3
 
+# Small Edge 策略阈值：小仓位、低竞争、高 reward efficiency
+SMALL_EDGE_DAILY_RATE_MIN = 3
+SMALL_EDGE_DAILY_RATE_MAX = 150
+SMALL_EDGE_MIN_SIZE_MAX = 200
+SMALL_EDGE_EFFICIENCY_MIN = 0.5
+SMALL_EDGE_SPREAD_MAX = 0.08
+SMALL_EDGE_DAYS_MIN = 3
+SMALL_EDGE_ORDER_SIZE = 100.0
+SMALL_EDGE_MAX_ORDER_SIZE = 300.0
+
 # 奖励变化检测阈值（USDC/天）
 REWARD_CHANGE_THRESHOLD = 1.0
 
 # Google Sheets 写入重试次数
 SHEETS_MAX_RETRIES = 3
+ENABLE_VOLUME_FETCH = False
+EXPORT_RUST_JSON = False
 
 
 # ================= 客户端初始化 =================
@@ -88,6 +100,7 @@ def _init_clients():
         'smart':      _get_or_create_worksheet(spreadsheet, "Smart LP Strategy"),
         'blue':       _get_or_create_worksheet(spreadsheet, "Blue Ocean Strategy"),
         'normal':     _get_or_create_worksheet(spreadsheet, "Normal LP Strategy"),
+        'small_edge': _get_or_create_worksheet(spreadsheet, "Small Edge Strategy"),
         'aggressive': _get_or_create_worksheet(spreadsheet, "High Reward Aggressive"),
         'rewards':    _get_or_create_worksheet(spreadsheet, "New Rewards Alert", rows=200, cols=15),
     }
@@ -225,7 +238,7 @@ def fetch_reward_changes(m_data: pd.DataFrame) -> pd.DataFrame:
 
 # ================= Rust JSON 自动导出 =================
 
-def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataFrame):
+def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataFrame, small_edge_df: pd.DataFrame = None):
     """
     将 Normal LP 和 High Reward Aggressive 策略表导出为 Rust 版本使用的 strategy_tokens.json。
     与 main.py 的 _parse_sheet_tokens() 使用相同的解析逻辑。
@@ -247,6 +260,8 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
         neg_risk_col = _find_col(df, "neg_risk")
         max_spread_col = _find_col(df, "max_spread")
         vol_col = _find_col(df, "volatility_sum")
+        order_size_col = _find_col(df, "small_edge_order_size") or _find_col(df, "order_size")
+        reward_rate_col = _find_col(df, "rewards_daily_rate")
 
         added = 0
         for _, row in df.iterrows():
@@ -291,10 +306,26 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
                 except (ValueError, TypeError):
                     vol_sum = 0.0
 
+            order_size = None
+            if order_size_col:
+                try:
+                    raw_order_size = float(str(row.get(order_size_col, "")).replace(",", ""))
+                    if raw_order_size > 0:
+                        order_size = raw_order_size
+                except (ValueError, TypeError):
+                    order_size = None
+
+            rewards_daily_rate = 0.0
+            if reward_rate_col:
+                try:
+                    rewards_daily_rate = float(str(row.get(reward_rate_col, 0)).replace(",", ""))
+                except (ValueError, TypeError):
+                    rewards_daily_rate = 0.0
+
             def add_token(token_id, token_type):
                 nonlocal added
                 if token_id not in tokens_by_id:
-                    tokens_by_id[token_id] = {
+                    token = {
                         "token_id": token_id,
                         "token_type": token_type,
                         "question": question,
@@ -304,12 +335,21 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
                         "volatility_sum": vol_sum,
                         "source": source_label,
                     }
+                    if order_size is not None:
+                        token["small_edge_order_size"] = order_size
+                    if rewards_daily_rate > 0:
+                        token["rewards_daily_rate"] = rewards_daily_rate
+                    tokens_by_id[token_id] = token
                     added += 1
                 else:
                     existing = tokens_by_id[token_id]
                     existing["min_size"] = max(existing["min_size"], min_size)
                     if max_spread is not None:
                         existing["max_spread"] = max_spread
+                    if order_size is not None:
+                        existing["small_edge_order_size"] = order_size
+                    if rewards_daily_rate > 0:
+                        existing["rewards_daily_rate"] = rewards_daily_rate
 
             t1 = str(row.get("token1", "")).strip()
             if t1 and len(t1) > 10 and t1.lower() != "nan":
@@ -324,6 +364,7 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
 
     n1 = _parse_df(normal_df, "Normal LP")
     n2 = _parse_df(aggressive_df, "High Reward")
+    n3 = _parse_df(small_edge_df, "Small Edge")
 
     tokens = list(tokens_by_id.values())
 
@@ -335,7 +376,7 @@ def export_strategy_tokens_json(normal_df: pd.DataFrame, aggressive_df: pd.DataF
         with open(RUST_STRATEGY_JSON_PATH, 'w', encoding='utf-8') as f:
             json.dump(tokens, f, indent=2, ensure_ascii=False)
         print(f"✅ [Rust JSON] 已导出 {len(tokens)} 个 token → {RUST_STRATEGY_JSON_PATH}")
-        print(f"   Normal LP: {n1}, High Reward: {n2}")
+        print(f"   Normal LP: {n1}, High Reward: {n2}, Small Edge: {n3}")
     except OSError as e:
         print(f"⚠️ [Rust JSON] 导出失败: {e}")
 
@@ -400,6 +441,11 @@ def clean_and_prepare_data(df):
 
 def _apply_strategy_filters(master_df):
     """对 master_df 应用四大策略筛选，返回各策略 DataFrame 的 dict"""
+    master_df = master_df.copy()
+    if 'rv_ratio' not in master_df.columns and {'gm_reward_per_100', 'volatility_sum'}.issubset(master_df.columns):
+        master_df['rv_ratio'] = master_df['gm_reward_per_100'] / (master_df['volatility_sum'] + 0.001)
+    if 'mid_rv_ratio' not in master_df.columns and {'mid_reward_per_100', 'volatility_sum'}.issubset(master_df.columns):
+        master_df['mid_rv_ratio'] = master_df['mid_reward_per_100'] / (master_df['volatility_sum'] + 0.001)
 
     # --- 策略 0: Smart LP 总览 (宽口径，用于查漏补缺) ---
     smart_df = master_df[
@@ -445,17 +491,57 @@ def _apply_strategy_filters(master_df):
     else:
         aggressive_df = pd.DataFrame()
 
+    # --- 策略 4: Small Edge（小仓位高效率） ---
+    small_edge_df = pd.DataFrame()
+    small_edge_required = {
+        'rewards_daily_rate', 'min_size', 'spread', 'best_bid', 'best_ask',
+        'bid_reward_per_100', 'ask_reward_per_100', 'max_spread',
+    }
+    if small_edge_required.issubset(master_df.columns):
+        small_edge_work = master_df.copy()
+        small_edge_work['small_edge_efficiency'] = small_edge_work[
+            ['bid_reward_per_100', 'ask_reward_per_100', 'mid_reward_per_100']
+            if 'mid_reward_per_100' in small_edge_work.columns
+            else ['bid_reward_per_100', 'ask_reward_per_100']
+        ].max(axis=1)
+        small_edge_work['small_edge_order_size'] = small_edge_work['min_size'].clip(
+            lower=SMALL_EDGE_ORDER_SIZE,
+            upper=SMALL_EDGE_MAX_ORDER_SIZE,
+        )
+        small_edge_work['small_edge_notional_est'] = (
+            small_edge_work['small_edge_order_size'] * small_edge_work['best_bid'].clip(lower=0.01)
+        ).round(2)
+        small_edge_work['small_edge_score'] = (
+            small_edge_work['small_edge_efficiency'] / (small_edge_work.get('volatility_sum', 0) + 1.0)
+        ).round(4)
+        small_edge_mask = (
+            (small_edge_work['rewards_daily_rate'] >= SMALL_EDGE_DAILY_RATE_MIN) &
+            (small_edge_work['rewards_daily_rate'] <= SMALL_EDGE_DAILY_RATE_MAX) &
+            (small_edge_work['min_size'] <= SMALL_EDGE_MIN_SIZE_MAX) &
+            (small_edge_work['small_edge_efficiency'] >= SMALL_EDGE_EFFICIENCY_MIN) &
+            (small_edge_work['spread'] <= SMALL_EDGE_SPREAD_MAX) &
+            (small_edge_work['best_bid'] >= 0.08) &
+            (small_edge_work['best_bid'] <= 0.92) &
+            ((small_edge_work['days_to_expiry'] > SMALL_EDGE_DAYS_MIN) | (small_edge_work['days_to_expiry'] == 0))
+        )
+        small_edge_df = small_edge_work[small_edge_mask].sort_values(
+            ['small_edge_efficiency', 'small_edge_score'],
+            ascending=False,
+        )
+
     print(f"Strategy Matches Found:")
     print(f"  - Smart LP (Master): {len(smart_df)}")
     print(f"  - Blue Ocean: {len(blue_ocean_df)}")
     print(f"  - Normal LP: {len(normal_lp_df)}")
     print(f"  - High Reward Aggressive: {len(aggressive_df)}")
+    print(f"  - Small Edge: {len(small_edge_df)}")
 
     return {
         'smart': smart_df,
         'blue': blue_ocean_df,
         'normal': normal_lp_df,
         'aggressive': aggressive_df,
+        'small_edge': small_edge_df,
     }
 
 
@@ -471,6 +557,7 @@ def _write_all_sheets(strategies, master_df, m_data, worksheets):
         (strategies['smart'],  worksheets['smart'],      'Smart LP Strategy'),
         (strategies['blue'],   worksheets['blue'],       'Blue Ocean Strategy'),
         (strategies['normal'], worksheets['normal'],     'Normal LP Strategy'),
+        (strategies['small_edge'], worksheets['small_edge'], 'Small Edge Strategy'),
         (agg_data,             worksheets['aggressive'], 'High Reward Aggressive'),
     ]
     # 全量更新时加入基础表
@@ -535,13 +622,16 @@ def fetch_and_process_data():
     all_results = get_all_results(rewarded_df, client)
     print("Got all Results")
 
-    # 🔥 批量获取 volume（替代逐个请求 Gamma API，节省 10-30 秒）
-    condition_ids = [r.get('condition_id', '') for r in all_results if r]
-    volumes_map = batch_fetch_volumes(condition_ids)
-    for r in all_results:
-        if r:
-            cid = r.get('condition_id', '')
-            r['volume'] = volumes_map.get(cid, 0.0)
+    # Volume 当前不参与策略筛选；默认关闭，避免无效 Gamma API 请求。
+    if ENABLE_VOLUME_FETCH:
+        condition_ids = [r.get('condition_id', '') for r in all_results if r]
+        volumes_map = batch_fetch_volumes(condition_ids)
+        for r in all_results:
+            if r:
+                cid = r.get('condition_id', '')
+                r['volume'] = volumes_map.get(cid, 0.0)
+    else:
+        print("📊 [批量 Volume] 已关闭（不参与当前策略筛选）")
 
     m_data, all_markets = get_markets(all_results, sel_df, maker_reward=0.75)
     print(f"Got all orderbook. Total markets: {len(all_markets)}")
@@ -594,12 +684,14 @@ def fetch_and_process_data():
             print(f"Error updating sheets: {e}")
             traceback.print_exc()
 
-        # 自动导出 Rust strategy_tokens.json
-        try:
-            export_strategy_tokens_json(strategies['normal'], strategies['aggressive'])
-        except Exception as e:
-            print(f"⚠️ [Rust JSON] 导出异常: {e}")
-            traceback.print_exc()
+        if EXPORT_RUST_JSON:
+            try:
+                export_strategy_tokens_json(strategies['normal'], strategies['aggressive'], strategies['small_edge'])
+            except Exception as e:
+                print(f"⚠️ [Rust JSON] 导出异常: {e}")
+                traceback.print_exc()
+        else:
+            print("🦀 [Rust JSON] 已关闭（Python main.py 不依赖该文件）")
     else:
         print("No data found to update.")
 

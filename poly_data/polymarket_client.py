@@ -2,9 +2,17 @@ from dotenv import load_dotenv          # Environment variable management
 import os                           # Operating system interface
 
 # Polymarket API client libraries
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import OrderArgs, BalanceAllowanceParams, AssetType, PartialCreateOrderOptions
-from py_clob_client.constants import POLYGON
+from py_clob_client_v2.client import ClobClient
+from py_clob_client_v2.clob_types import (
+    OrderArgs,
+    BalanceAllowanceParams,
+    AssetType,
+    PartialCreateOrderOptions,
+    OrderMarketCancelParams,
+    OrderBookSummary,
+    OrderSummary,
+)
+from py_clob_client_v2.constants import POLYGON
 
 # Web3 libraries for blockchain interaction
 from web3 import Web3
@@ -16,13 +24,30 @@ import pandas as pd                 # Data analysis
 import json                         # JSON processing
 import subprocess                   # For calling external processes
 
-from py_clob_client.clob_types import OpenOrderParams
+from py_clob_client_v2.clob_types import OpenOrderParams
 
 # Smart contract ABIs
 from poly_data.abis import NegRiskAdapterABI, ConditionalTokenABI, erc20_abi
 
 # Load environment variables
 load_dotenv()
+
+
+def _adapt_order_book(raw):
+    if raw is None or not isinstance(raw, dict):
+        return raw
+    return OrderBookSummary(
+        market=raw.get("market"),
+        asset_id=raw.get("asset_id"),
+        timestamp=raw.get("timestamp"),
+        bids=[OrderSummary(price=b.get("price"), size=b.get("size")) for b in (raw.get("bids") or [])],
+        asks=[OrderSummary(price=a.get("price"), size=a.get("size")) for a in (raw.get("asks") or [])],
+        min_order_size=raw.get("min_order_size"),
+        neg_risk=raw.get("neg_risk"),
+        tick_size=raw.get("tick_size"),
+        last_trade_price=raw.get("last_trade_price"),
+        hash=raw.get("hash"),
+    )
 
 
 class PolymarketClient:
@@ -66,8 +91,15 @@ class PolymarketClient:
         )
 
         # Set up API credentials
-        self.creds = self.client.create_or_derive_api_creds()
+        self.creds = self.client.create_or_derive_api_key()
         self.client.set_api_creds(creds=self.creds)
+
+        raw_get_order_book = self.client.get_order_book
+
+        def get_order_book_v1_compat(token_id):
+            return _adapt_order_book(raw_get_order_book(token_id))
+
+        self.client.get_order_book = get_order_book_v1_compat
         
         # Initialize Web3 connection to Polygon
         web3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
@@ -244,7 +276,7 @@ class PolymarketClient:
         Returns:
             DataFrame: All open orders with their details
         """
-        orders_df = pd.DataFrame(self.client.get_orders())
+        orders_df = pd.DataFrame(self.client.get_open_orders())
 
         # Convert numeric columns to float
         for col in ['original_size', 'size_matched', 'price']:
@@ -263,7 +295,7 @@ class PolymarketClient:
         Returns:
             DataFrame: Open orders for the specified market
         """
-        orders_df = pd.DataFrame(self.client.get_orders(OpenOrderParams(
+        orders_df = pd.DataFrame(self.client.get_open_orders(OpenOrderParams(
             market=market,
         )))
 
@@ -282,7 +314,7 @@ class PolymarketClient:
         Args:
             asset_id (str): Asset token ID
         """
-        self.client.cancel_market_orders(asset_id=str(asset_id))
+        self.client.cancel_market_orders(OrderMarketCancelParams(asset_id=str(asset_id)))
 
 
     
@@ -293,7 +325,7 @@ class PolymarketClient:
         Args:
             marketId (str): Market ID
         """
-        self.client.cancel_market_orders(market=marketId)
+        self.client.cancel_market_orders(OrderMarketCancelParams(market=marketId))
 
     
     def merge_positions(self, amount_to_merge, condition_id, is_neg_risk_market):
