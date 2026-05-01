@@ -33,9 +33,9 @@ const wallet = new ethers.Wallet(privateKey, provider);
 // Polymarket contract addresses
 const addresses = {
   // Adapter contract for negative risk markets
-  neg_risk_adapter: '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296',
-  // USDC token contract on Polygon
-  collateral: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+  neg_risk_adapter: '0xadA2005600Dec949baf300f4C6120000bDB6eAab',
+  // Polymarket USD collateral contract on Polygon
+  collateral: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB',
   // Main conditional tokens contract for prediction markets
   conditional_tokens: '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'
 };

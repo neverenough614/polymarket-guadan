@@ -14,6 +14,15 @@ import time
 
 import os
 
+from poly_data.CONSTANTS import (
+    CONDITIONAL_TOKENS,
+    CTF_COLLATERAL_ADAPTER,
+    CTF_EXCHANGE,
+    NEG_RISK_CTF_COLLATERAL_ADAPTER,
+    NEG_RISK_CTF_EXCHANGE,
+    USDC,
+)
+
 MAX_INT = 2**256 - 1
 
 def get_clob_client():
@@ -51,14 +60,21 @@ def approveContracts():
     with open('erc20ABI.json', 'r') as file:
         erc20_abi = json.load(file)
 
-    ctf_address = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+    ctf_address = CONDITIONAL_TOKENS
     erc1155_set_approval = """[{"inputs": [{ "internalType": "address", "name": "operator", "type": "address" },{ "internalType": "bool", "name": "approved", "type": "bool" }],"name": "setApprovalForAll","outputs": [],"stateMutability": "nonpayable","type": "function"}]"""
 
-    usdc_contract = web3.eth.contract(address="0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", abi=erc20_abi)   # usdc.e
+    usdc_contract = web3.eth.contract(address=USDC, abi=erc20_abi)   # usdc.e
     ctf_contract = web3.eth.contract(address=ctf_address, abi=erc1155_set_approval)
     
 
-    for address in ['0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E', '0xC5d563A36AE78145C45a50134d48A1215220f80a', '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296']:
+    approval_targets = [
+        CTF_EXCHANGE,
+        NEG_RISK_CTF_EXCHANGE,
+        CTF_COLLATERAL_ADAPTER,
+        NEG_RISK_CTF_COLLATERAL_ADAPTER,
+    ]
+
+    for address in approval_targets:
         usdc_nonce = web3.eth.get_transaction_count( wallet.address )
         raw_usdc_txn = usdc_contract.functions.approve(address, int(MAX_INT, 0)).build_transaction({
             "chainId": 137, 
@@ -90,7 +106,7 @@ def approveContracts():
 
 
     nonce = web3.eth.get_transaction_count( wallet.address )
-    raw_txn_2 = usdc_contract.functions.approve("0xC5d563A36AE78145C45a50134d48A1215220f80a", int(MAX_INT, 0)).build_transaction({
+    raw_txn_2 = usdc_contract.functions.approve(NEG_RISK_CTF_EXCHANGE, int(MAX_INT, 0)).build_transaction({
         "chainId": 137, 
         "from": wallet.address, 
         "nonce": nonce
@@ -100,7 +116,7 @@ def approveContracts():
 
 
     nonce = web3.eth.get_transaction_count( wallet.address )
-    raw_txn_3 = usdc_contract.functions.approve("0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296", int(MAX_INT, 0)).build_transaction({
+    raw_txn_3 = usdc_contract.functions.approve(NEG_RISK_CTF_COLLATERAL_ADAPTER, int(MAX_INT, 0)).build_transaction({
         "chainId": 137, 
         "from": wallet.address, 
         "nonce": nonce
