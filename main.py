@@ -2687,7 +2687,7 @@ def get_orderbook(asset_id: str, depth: int = 10):
 @app.get("/orders/log")
 def get_orders_log():
     with placed_orders_log_lock:
-        log_snapshot = list(placed_orders_log[-50:])
+        log_snapshot = list(placed_orders_log)[-50:]
         total = len(placed_orders_log)
         placed_count = sum(1 for o in placed_orders_log if o.get("buy_status") == "placed" or o.get("sell_status") == "placed")
     return {
