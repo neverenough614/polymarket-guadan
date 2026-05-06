@@ -200,6 +200,8 @@ reward_program_status_cache_lock = threading.Lock()
 # 清仓锁：正在清仓的 token 不允许被重试队列重挂（防止"边清边买"死循环）
 closing_tokens: set = set()
 closing_tokens_lock = threading.Lock()
+order_token_locks: Dict[str, threading.Lock] = {}
+order_token_locks_lock = threading.Lock()
 
 
 # ======================================================
@@ -219,6 +221,44 @@ def _get_top_of_book(price_dict: Dict, depth: int, reverse: bool) -> List[Dict]:
             items.append((p_f, s_f))
     items.sort(key=lambda x: x[0], reverse=reverse)
     return [{"price": p, "size": s} for p, s in items[:depth]]
+
+
+def get_order_token_lock(token_id: str) -> threading.Lock:
+    with order_token_locks_lock:
+        lock = order_token_locks.get(token_id)
+        if lock is None:
+            lock = threading.Lock()
+            order_token_locks[token_id] = lock
+        return lock
+
+
+def has_matching_live_order(orders: List[Dict], token_id: str, side: str, price: float, tolerance: float = 0.0005) -> bool:
+    target_token = str(token_id)
+    target_side = str(side).upper()
+    for order in orders or []:
+        status = str(order.get("status", "")).upper()
+        if status and status != "LIVE":
+            continue
+        order_token = str(order.get("token_id") or order.get("asset_id") or "")
+        if order_token != target_token:
+            continue
+        if str(order.get("side", "")).upper() != target_side:
+            continue
+        try:
+            order_price = float(order.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if abs(order_price - float(price)) <= tolerance:
+            return True
+    return False
+
+
+def get_live_orders_safe(poly_client: PolymarketClient) -> List[Dict]:
+    try:
+        return poly_client.client.get_open_orders()
+    except Exception as e:
+        print(f"   ⚠️ 查询已有挂单失败，继续尝试下单: {e}")
+        return []
 
 
 def load_markets_for_dashboard():
@@ -919,6 +959,12 @@ def calculate_small_edge_size(token_info: Dict, base_min_size: float) -> Optiona
 # 🚀 对单个 token 执行挂单
 # ======================================================
 def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Dict:
+    token_id = token_info["token_id"]
+    with get_order_token_lock(token_id):
+        return _place_order_for_token_locked(poly_client, token_info)
+
+
+def _place_order_for_token_locked(poly_client: PolymarketClient, token_info: Dict) -> Dict:
     token_id   = token_info["token_id"]
     token_type = token_info["token_type"]
     question   = token_info["question"]
@@ -1029,6 +1075,8 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
             buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_bids)
             sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_asks)
 
+        existing_orders = get_live_orders_safe(poly_client) if (buy_result or sell_result) else []
+
         if extreme:
             # 极端价格市场：必须买卖双向都满足深度条件，否则整个跳过
             if buy_result is None or sell_result is None:
@@ -1052,6 +1100,8 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
             result["buy_reward_efficiency"] = buy_eff
             if not buy_eff["place"]:
                 result["buy_status"] = f"reward_efficiency_skip: {buy_eff['reason']}"
+            elif has_matching_live_order(existing_orders, token_id, "BUY", buy_price):
+                result["buy_status"] = "duplicate_skip"
             else:
                 try:
                     resp = poly_client.create_order(token_id, "BUY", buy_price, order_size, neg_risk=neg_risk)
@@ -1073,6 +1123,8 @@ def place_order_for_token(poly_client: PolymarketClient, token_info: Dict) -> Di
             result["sell_reward_efficiency"] = sell_eff
             if not sell_eff["place"]:
                 result["sell_status"] = f"reward_efficiency_skip: {sell_eff['reason']}"
+            elif has_matching_live_order(existing_orders, token_id, "SELL", sell_price):
+                result["sell_status"] = "duplicate_skip"
             else:
                 try:
                     resp = poly_client.create_order(token_id, "SELL", sell_price, order_size, neg_risk=neg_risk)
