@@ -60,6 +60,8 @@ SMALL_EDGE_SPREAD_MAX = 0.08
 SMALL_EDGE_DAYS_MIN = 3
 SMALL_EDGE_ORDER_SIZE = 100.0
 SMALL_EDGE_MAX_ORDER_SIZE = 300.0
+SMALL_EDGE_BEST_BID_MIN = 0.10
+SMALL_EDGE_BEST_BID_MAX = 0.90
 
 # 奖励变化检测阈值（USDC/天）
 REWARD_CHANGE_THRESHOLD = 1.0
@@ -520,8 +522,8 @@ def _apply_strategy_filters(master_df):
             (small_edge_work['min_size'] <= SMALL_EDGE_MIN_SIZE_MAX) &
             (small_edge_work['small_edge_efficiency'] >= SMALL_EDGE_EFFICIENCY_MIN) &
             (small_edge_work['spread'] <= SMALL_EDGE_SPREAD_MAX) &
-            (small_edge_work['best_bid'] >= 0.08) &
-            (small_edge_work['best_bid'] <= 0.92) &
+            (small_edge_work['best_bid'] > SMALL_EDGE_BEST_BID_MIN) &
+            (small_edge_work['best_bid'] < SMALL_EDGE_BEST_BID_MAX) &
             ((small_edge_work['days_to_expiry'] > SMALL_EDGE_DAYS_MIN) | (small_edge_work['days_to_expiry'] == 0))
         )
         small_edge_df = small_edge_work[small_edge_mask].sort_values(

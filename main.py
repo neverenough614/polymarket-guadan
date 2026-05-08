@@ -88,6 +88,9 @@ SMALL_EDGE_MIN_LEVEL_DEPTH    = 20.0
 SMALL_EDGE_MIN_TOP5_DEPTH     = 100.0
 SMALL_EDGE_MAX_SPREAD_FRAC    = 0.90
 SMALL_EDGE_MIN_Q_SCORE_RATIO  = 0.05
+SMALL_EDGE_MAX_EXIT_GAP       = 0.03
+SMALL_EDGE_EXIT_DEPTH_MULTIPLIER = 1.0
+SMALL_EDGE_EATEN_COOLDOWN_SECONDS = 6 * 60 * 60
 PROBE_BATCH_SIZE = 100
 PROBE_OBSERVE_SECONDS = 90
 STABLE_ACTIVE_TARGET = 45
@@ -202,6 +205,8 @@ closing_tokens: set = set()
 closing_tokens_lock = threading.Lock()
 order_token_locks: Dict[str, threading.Lock] = {}
 order_token_locks_lock = threading.Lock()
+small_edge_eaten_cooldown_until: Dict[str, float] = {}
+small_edge_eaten_cooldown_lock = threading.Lock()
 
 
 # ======================================================
@@ -259,6 +264,22 @@ def get_live_orders_safe(poly_client: PolymarketClient) -> List[Dict]:
     except Exception as e:
         print(f"   ⚠️ 查询已有挂单失败，继续尝试下单: {e}")
         return []
+
+
+def get_small_edge_eaten_cooldown_remaining(token_id: str) -> float:
+    with small_edge_eaten_cooldown_lock:
+        key = str(token_id)
+        until = small_edge_eaten_cooldown_until.get(key, 0.0)
+        remaining = until - time.time()
+        if remaining <= 0:
+            small_edge_eaten_cooldown_until.pop(key, None)
+            return 0.0
+        return remaining
+
+
+def mark_small_edge_eaten_cooldown(token_id: str) -> None:
+    with small_edge_eaten_cooldown_lock:
+        small_edge_eaten_cooldown_until[str(token_id)] = time.time() + SMALL_EDGE_EATEN_COOLDOWN_SECONDS
 
 
 def load_markets_for_dashboard():
@@ -888,6 +909,42 @@ def is_extreme_price_market(best_bid: Optional[float]) -> bool:
     # 使用 <= / >= 确保恰好 10c 和 90c 也被识别为极端价格市场
     return best_bid <= EXTREME_PRICE_THRESHOLD or best_bid >= (1.0 - EXTREME_PRICE_THRESHOLD)
 
+def small_edge_exit_liquidity_ok(sorted_bids, buy_price: float, order_size: float) -> Tuple[bool, str]:
+    """Small Edge needs a nearby lower bid with enough notional to exit after a fill."""
+    try:
+        if not sorted_bids or buy_price is None or order_size is None:
+            return False, "missing_book"
+
+        buy_price = float(buy_price)
+        order_size = float(order_size)
+        nearest_lower = None
+        support_depth = 0.0
+        for level in sorted_bids:
+            price = float(level.price)
+            if price >= buy_price:
+                continue
+            depth = price * float(level.size)
+            if nearest_lower is None:
+                nearest_lower = price
+            if buy_price - price <= SMALL_EDGE_MAX_EXIT_GAP + 1e-9:
+                support_depth += depth
+
+        if nearest_lower is None:
+            return False, "no_lower_bid"
+
+        gap = buy_price - nearest_lower
+        if gap > SMALL_EDGE_MAX_EXIT_GAP:
+            return False, f"exit_gap_{gap:.3f}"
+
+        required_depth = buy_price * order_size * SMALL_EDGE_EXIT_DEPTH_MULTIPLIER
+        if support_depth < required_depth:
+            return False, f"exit_depth_{support_depth:.1f}_lt_{required_depth:.1f}"
+
+        return True, "ok"
+    except Exception as e:
+        return False, f"error_{str(e)[:30]}"
+
+
 def calculate_dynamic_size(book, mid: Optional[float], min_size: float,
                            volatility_sum: float = 0.0,
                            size_ratio: float = DYNAMIC_SIZE_RATIO,
@@ -970,6 +1027,7 @@ def _place_order_for_token_locked(poly_client: PolymarketClient, token_info: Dic
     question   = token_info["question"]
     neg_risk   = token_info.get("neg_risk", False)
     max_spread = token_info.get("max_spread", None)
+    source     = token_info.get("source", "Normal LP")
 
     # 基础最小挂单量（保底）
     raw_min_size = token_info["min_size"]
@@ -989,6 +1047,14 @@ def _place_order_for_token_locked(poly_client: PolymarketClient, token_info: Dic
             result["buy_status"] = "closing_locked"
             result["sell_status"] = "closing_locked"
             result["error"] = "正在清仓中，跳过重挂"
+            return result
+
+    if source == "Small Edge":
+        cooldown_remaining = get_small_edge_eaten_cooldown_remaining(token_id)
+        if cooldown_remaining > 0:
+            result["buy_status"] = "small_edge_eaten_cooldown"
+            result["sell_status"] = "small_edge_eaten_cooldown"
+            result["error"] = f"Small Edge eaten cooldown {cooldown_remaining / 60:.0f}m"
             return result
 
     try:
@@ -1013,7 +1079,6 @@ def _place_order_for_token_locked(poly_client: PolymarketClient, token_info: Dic
 
         # 🔥 动态计算挂单量（基于前三档总深度 + 波动率加权）
         # 根据策略来源使用不同的占比和上限
-        source = token_info.get("source", "Normal LP")
         vol_sum = token_info.get("volatility_sum", 0.0)
         if source == "Small Edge":
             order_size = calculate_small_edge_size(token_info, base_min_size)
@@ -1074,6 +1139,23 @@ def _place_order_for_token_locked(poly_client: PolymarketClient, token_info: Dic
         else:
             buy_result  = analyze_best_place_price_from_book(book, "BUY",  max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_bids)
             sell_result = analyze_best_place_price_from_book(book, "SELL", max_spread, mid, order_size, skip_tier1=skip_t1, sorted_levels=sorted_asks)
+
+        if source == "Small Edge" and extreme:
+            result["buy_status"] = "small_edge_extreme_skip"
+            result["sell_status"] = "small_edge_extreme_skip"
+            result["error"] = f"Small Edge skips extreme price market ({best_bid:.2f})"
+            return result
+
+        if source == "Small Edge" and buy_result:
+            buy_price_for_exit = buy_result[0]
+            exit_ok, exit_reason = small_edge_exit_liquidity_ok(sorted_bids, buy_price_for_exit, order_size)
+            if not exit_ok:
+                result["buy_price"] = buy_price_for_exit
+                result["buy_tier"] = buy_result[1]
+                result["buy_status"] = "small_edge_exit_risk"
+                result["sell_status"] = "small_edge_exit_risk"
+                result["error"] = f"Small Edge exit support failed: {exit_reason}"
+                return result
 
         existing_orders = get_live_orders_safe(poly_client) if (buy_result or sell_result) else []
 
@@ -2002,6 +2084,7 @@ async def auto_close_positions_task(strategy_tokens: list):
                             "question":   t["question"],
                             "shares":     size,
                             "neg_risk":   t.get("neg_risk", False),
+                            "source":     t.get("source", "Normal LP"),
                         })
                     else:
                         # 手动持仓（网页端买入等）：跳过，不自动清仓
@@ -2028,6 +2111,7 @@ async def auto_close_positions_task(strategy_tokens: list):
                 question   = pos["question"]
                 token_type = pos["token_type"]
                 neg_risk   = pos["neg_risk"]
+                source     = pos.get("source", "Normal LP")
 
                 # 🕐 冷却检查：清仓失败后等待一段时间再重试，避免无限刷屏
                 now_ts = time.time()
@@ -2036,6 +2120,10 @@ async def auto_close_positions_task(strategy_tokens: list):
                     continue  # 仍在冷却中，静默跳过
 
                 # 🔒 加入清仓锁，阻止重试队列在清仓期间重挂该 token
+                if source == "Small Edge":
+                    mark_small_edge_eaten_cooldown(token_id)
+                    print(f"      Small Edge eaten cooldown: {SMALL_EDGE_EATEN_COOLDOWN_SECONDS / 3600:.0f}h")
+
                 with closing_tokens_lock:
                     closing_tokens.add(token_id)
 
