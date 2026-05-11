@@ -25,6 +25,12 @@ class ExitGapBook:
     asks = [level(0.80, 200), level(0.81, 200), level(0.82, 200)]
 
 
+class LongPaybackBook:
+    market = "condition-long-payback"
+    bids = [level(0.49, 120), level(0.46, 500), level(0.45, 500)]
+    asks = [level(0.51, 120), level(0.52, 500), level(0.53, 500)]
+
+
 class FakeClob:
     def __init__(self, book=None):
         self.book = book or ThinBook()
@@ -124,6 +130,44 @@ def test_small_edge_skips_when_buy_price_has_no_exit_support(monkeypatch):
     assert result["buy_status"] == "small_edge_exit_risk"
     assert result["sell_status"] == "small_edge_exit_risk"
     assert poly_client.created_orders == []
+
+
+def test_shadow_payback_score_does_not_block_small_edge_order(monkeypatch):
+    import main
+
+    monkeypatch.setattr(main.market_heat.tracker, "get_heat_state", lambda token_id: ("NORMAL", 0, ""))
+    monkeypatch.setattr(
+        main,
+        "reward_efficiency_check",
+        lambda *args, **kwargs: {
+            "place": True,
+            "reason": "ok",
+            "expected_daily_reward": 0.4,
+            "expected_reward_per_100": 1.0,
+            "my_q_share": 0.1,
+        },
+    )
+    poly_client = FakePolyClient(LongPaybackBook())
+
+    result = main.place_order_for_token(
+        poly_client,
+        {
+            "token_id": "small-long-payback-token",
+            "token_type": "YES",
+            "question": "Small edge long payback test market",
+            "min_size": 50.0,
+            "neg_risk": False,
+            "max_spread": 0.045,
+            "volatility_sum": 0.0,
+            "source": "Small Edge",
+        },
+    )
+
+    assert result["buy_status"] == "placed"
+    assert result["shadow_score"]["mode"] == "shadow_only"
+    assert result["shadow_score"]["exit_payback"]["buy_payback_days"] > 3
+    assert result["shadow_score"]["shadow_decision"]["small_edge_payback_3d"] == "would_skip"
+    assert poly_client.created_orders
 
 
 def test_update_markets_builds_small_edge_strategy():
