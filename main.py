@@ -91,7 +91,6 @@ SMALL_EDGE_MIN_Q_SCORE_RATIO  = 0.05
 SMALL_EDGE_MAX_EXIT_GAP       = 0.03
 SMALL_EDGE_EXIT_DEPTH_MULTIPLIER = 1.0
 SMALL_EDGE_EATEN_COOLDOWN_SECONDS = 6 * 60 * 60
-SHADOW_PAYBACK_DAYS_THRESHOLD = 3.0
 PROBE_BATCH_SIZE = 100
 PROBE_OBSERVE_SECONDS = 90
 STABLE_ACTIVE_TARGET = 45
@@ -946,156 +945,6 @@ def small_edge_exit_liquidity_ok(sorted_bids, buy_price: float, order_size: floa
         return False, f"error_{str(e)[:30]}"
 
 
-def simulate_buy_exit_from_bids(sorted_bids, buy_price: Optional[float], order_size: Optional[float]) -> Dict:
-    if not sorted_bids or buy_price is None or order_size is None:
-        return {"ok": False, "reason": "missing_inputs"}
-    try:
-        buy_price = float(buy_price)
-        order_size = float(order_size)
-        remaining = order_size
-        gross = 0.0
-        levels_used = []
-
-        for level in sorted_bids:
-            price = float(level.price)
-            if price >= buy_price:
-                continue
-            size = float(level.size)
-            take = min(remaining, size)
-            if take <= 0:
-                continue
-            gross += take * price
-            remaining -= take
-            levels_used.append({
-                "price": round(price, 6),
-                "shares": round(take, 6),
-                "notional": round(price * take, 6),
-            })
-            if remaining <= 1e-9:
-                break
-
-        filled = order_size - remaining
-        if filled <= 0:
-            return {"ok": False, "reason": "no_exit_depth", "unfilled_shares": round(order_size, 6)}
-        avg_exit = gross / filled
-        loss = max(0.0, (buy_price - avg_exit) * filled)
-        return {
-            "ok": remaining <= 1e-9,
-            "reason": "ok" if remaining <= 1e-9 else "partial_exit_depth",
-            "avg_exit_price": round(avg_exit, 6),
-            "exit_loss_usd": round(loss, 6),
-            "exit_slippage_c": round((buy_price - avg_exit) * 100.0, 6),
-            "filled_shares": round(filled, 6),
-            "unfilled_shares": round(max(0.0, remaining), 6),
-            "levels_used": levels_used[:5],
-        }
-    except Exception as e:
-        return {"ok": False, "reason": f"error_{str(e)[:30]}"}
-
-
-def build_shadow_score(
-    token_info: Dict,
-    buy_status: str,
-    sell_status: str,
-    buy_price: Optional[float],
-    sell_price: Optional[float],
-    order_size: Optional[float],
-    sorted_bids,
-    best_bid: Optional[float],
-    best_ask: Optional[float],
-    mid: Optional[float],
-    max_spread: Optional[float],
-    heat_state: str,
-    heat_score: int,
-    buy_eff: Optional[Dict] = None,
-    sell_eff: Optional[Dict] = None,
-) -> Dict:
-    buy_eff = buy_eff or {}
-    sell_eff = sell_eff or {}
-    buy_daily = as_float(buy_eff.get("expected_daily_reward"))
-    sell_daily = as_float(sell_eff.get("expected_daily_reward"))
-    active_buy_daily = buy_daily if buy_status in ("placed", "duplicate_skip") else 0.0
-    active_sell_daily = sell_daily if sell_status in ("placed", "duplicate_skip") else 0.0
-    active_daily = active_buy_daily + active_sell_daily
-
-    exit_info = simulate_buy_exit_from_bids(sorted_bids, buy_price, order_size)
-    loss = as_float(exit_info.get("exit_loss_usd"))
-    buy_payback = (loss / buy_daily) if buy_daily > 0 and exit_info.get("ok") else None
-    active_payback = (loss / active_daily) if active_daily > 0 and exit_info.get("ok") else None
-
-    spread = (best_ask - best_bid) if best_bid is not None and best_ask is not None else None
-    spread_frac = (spread / max_spread) if spread is not None and max_spread else None
-    heat_component = min(40.0, max(0.0, float(heat_score or 0)) * 0.5)
-    spread_component = min(25.0, max(0.0, (spread_frac or 0.0)) * 25.0)
-    exit_component = min(25.0, max(0.0, as_float(exit_info.get("exit_slippage_c"))) * 8.0)
-    depth_component = 10.0 if not exit_info.get("ok") else 0.0
-    fill_risk_score = round(heat_component + spread_component + exit_component + depth_component, 3)
-    if fill_risk_score >= 50:
-        fill_risk_level = "HIGH"
-    elif fill_risk_score >= 25:
-        fill_risk_level = "MEDIUM"
-    else:
-        fill_risk_level = "LOW"
-
-    source = token_info.get("source", "Normal LP")
-    if source != "Small Edge":
-        payback_decision = "not_applicable"
-    elif buy_price is None or order_size is None:
-        payback_decision = "no_buy_candidate"
-    elif active_payback is None:
-        payback_decision = "unknown"
-    elif active_payback > SHADOW_PAYBACK_DAYS_THRESHOLD:
-        payback_decision = "would_skip"
-    else:
-        payback_decision = "pass"
-
-    return {
-        "mode": "shadow_only",
-        "source": source,
-        "reward": {
-            "buy_expected_daily_reward": round(buy_daily, 6),
-            "sell_expected_daily_reward": round(sell_daily, 6),
-            "active_expected_daily_reward": round(active_daily, 6),
-            "buy_reward_per_100": buy_eff.get("expected_reward_per_100"),
-            "sell_reward_per_100": sell_eff.get("expected_reward_per_100"),
-            "buy_q_share": buy_eff.get("my_q_share"),
-            "sell_q_share": sell_eff.get("my_q_share"),
-        },
-        "exit_payback": {
-            **exit_info,
-            "buy_payback_days": round(buy_payback, 6) if buy_payback is not None else None,
-            "active_payback_days": round(active_payback, 6) if active_payback is not None else None,
-            "threshold_days": SHADOW_PAYBACK_DAYS_THRESHOLD,
-        },
-        "fill_risk": {
-            "score": fill_risk_score,
-            "level": fill_risk_level,
-            "heat_state": heat_state,
-            "heat_score": heat_score,
-            "spread": round(spread, 6) if spread is not None else None,
-            "spread_frac_of_max": round(spread_frac, 6) if spread_frac is not None else None,
-            "components": {
-                "heat": round(heat_component, 3),
-                "spread": round(spread_component, 3),
-                "exit": round(exit_component, 3),
-                "depth": round(depth_component, 3),
-            },
-        },
-        "shadow_decision": {
-            "small_edge_payback_3d": payback_decision,
-        },
-        "inputs": {
-            "buy_status": buy_status,
-            "sell_status": sell_status,
-            "buy_price": buy_price,
-            "sell_price": sell_price,
-            "order_size": order_size,
-            "mid": round(mid, 6) if mid is not None else None,
-            "max_spread": max_spread,
-        },
-    }
-
-
 def calculate_dynamic_size(book, mid: Optional[float], min_size: float,
                            volatility_sum: float = 0.0,
                            size_ratio: float = DYNAMIC_SIZE_RATIO,
@@ -1322,9 +1171,6 @@ def _place_order_for_token_locked(poly_client: PolymarketClient, token_info: Dic
                 return result
 
         # 执行买单
-        buy_eff = None
-        sell_eff = None
-
         if buy_result:
             buy_price, buy_tier, _ = buy_result
             result["buy_price"] = buy_price
@@ -1369,24 +1215,6 @@ def _place_order_for_token_locked(poly_client: PolymarketClient, token_info: Dic
                     result["sell_status"] = f"error: {str(e)[:50]}"
         else:
             result["sell_status"] = "depth_insufficient"
-
-        result["shadow_score"] = build_shadow_score(
-            token_info=token_info,
-            buy_status=result.get("buy_status"),
-            sell_status=result.get("sell_status"),
-            buy_price=result.get("buy_price"),
-            sell_price=result.get("sell_price"),
-            order_size=order_size,
-            sorted_bids=sorted_bids,
-            best_bid=best_bid,
-            best_ask=best_ask,
-            mid=mid,
-            max_spread=max_spread,
-            heat_state=heat_state,
-            heat_score=heat_score,
-            buy_eff=buy_eff,
-            sell_eff=sell_eff,
-        )
 
         return result
 
