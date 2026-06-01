@@ -8,6 +8,40 @@ def _token(token_id, source="Normal LP", efficiency=0.0):
     }
 
 
+def test_batch_order_book_fetch_maps_returned_books_and_omits_missing():
+    import main
+
+    class FakeClient:
+        def get_order_books(self, token_ids):
+            return {
+                "token-a": "book-a",
+                "token-c": "book-c",
+            }
+
+    results = main.get_all_order_books_batch(FakeClient(), ["token-a", "token-b", "token-c"])
+
+    assert results == {"token-a": "book-a", "token-c": "book-c"}
+
+
+def test_concurrent_order_book_fetch_falls_back_when_batch_fails(monkeypatch):
+    import main
+
+    class FakeClient:
+        def __init__(self):
+            self.client = self
+
+        def get_order_books(self, token_ids):
+            raise RuntimeError("batch failed")
+
+        def get_order_book(self, token_id):
+            return f"single-{token_id}"
+
+    monkeypatch.setattr(main, "MAX_CONCURRENT_WORKERS", 2)
+    results = main.get_all_order_books_concurrent(FakeClient(), ["token-a", "token-b"])
+
+    assert results == {"token-a": "single-token-a", "token-b": "single-token-b"}
+
+
 def test_placement_limit_keeps_normal_first_and_caps_small_edge(monkeypatch):
     import main
 

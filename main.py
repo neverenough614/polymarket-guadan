@@ -2294,6 +2294,10 @@ def get_order_book_safe_monitor(poly_client: PolymarketClient, token_id: str):
 
 
 def get_all_order_books_concurrent(poly_client: PolymarketClient, token_ids: List[str]):
+    batch_results = get_all_order_books_batch(poly_client, token_ids)
+    if batch_results is not None:
+        return batch_results
+
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_WORKERS) as executor:
         future_to_token = {
@@ -2314,6 +2318,35 @@ def get_all_order_books_concurrent(poly_client: PolymarketClient, token_ids: Lis
             unfinished = sum(1 for f in future_to_token if not f.done())
             if unfinished > 0:
                 print(f"\n   ⚠️ {unfinished} 个盘口查询超时，已跳过（网络延迟）")
+    return results
+
+
+def get_all_order_books_batch(poly_client: PolymarketClient, token_ids: List[str]) -> Optional[Dict]:
+    if not token_ids:
+        return {}
+    client_obj = getattr(poly_client, "client", poly_client)
+    get_books = getattr(client_obj, "get_order_books", None)
+    if not callable(get_books):
+        return None
+    try:
+        books = get_books(token_ids)
+    except Exception as e:
+        print(f"\n   ⚠️ 批量盘口查询失败，回退逐个查询: {e}")
+        return None
+
+    requested_ids = {str(token_id) for token_id in token_ids}
+    if isinstance(books, dict):
+        return {
+            str(token_id): book
+            for token_id, book in books.items()
+            if str(token_id) in requested_ids and book is not None
+        }
+
+    results = {}
+    for book in books or []:
+        asset_id = str(getattr(book, "asset_id", "") or "")
+        if asset_id in requested_ids:
+            results[asset_id] = book
     return results
 
 

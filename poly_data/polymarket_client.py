@@ -55,6 +55,12 @@ def _adapt_order_book(raw):
     )
 
 
+def _adapt_order_books(raw_books):
+    if not isinstance(raw_books, list):
+        return []
+    return [_adapt_order_book(book) for book in raw_books]
+
+
 class PolymarketClient:
     """
     Client for interacting with Polymarket's API and smart contracts.
@@ -105,6 +111,16 @@ class PolymarketClient:
             return _adapt_order_book(raw_get_order_book(token_id))
 
         self.client.get_order_book = get_order_book_v1_compat
+
+        def get_order_books_v1_compat(token_ids):
+            body = [{"token_id": str(token_id)} for token_id in token_ids or []]
+            if not body:
+                return []
+            resp = requests.post(f"{host}/books", json=body, timeout=10)
+            resp.raise_for_status()
+            return _adapt_order_books(resp.json())
+
+        self.client.get_order_books = get_order_books_v1_compat
         
         # Initialize Web3 connection to Polygon
         web3 = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
