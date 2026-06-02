@@ -80,4 +80,4 @@ def test_mainnet_adds_api_key_header():
     )
     rest.get_markets()
     _, _, headers, _ = t.calls[0]
-    assert headers["X-API-KEY"] == "KEY"
+    assert headers["x-api-key"] == "KEY"

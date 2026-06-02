@@ -74,7 +74,7 @@ class PredictRest:
         if jwt:
             h["Authorization"] = f"Bearer {jwt}"
         if self._api_key:
-            h["X-API-KEY"] = self._api_key  # VERIFY header 名
+            h["x-api-key"] = self._api_key  # 主网必需；测试网可省
         return h
 
     def _request(self, method: str, path: str, json_body=None, _retried=False) -> Dict[str, Any]:
@@ -88,12 +88,14 @@ class PredictRest:
             raise PredictApiError(resp.status_code, resp.json())
         return resp.json()
 
-    # ---- 鉴权（路径 VERIFY）----
-    def get_auth_message(self, address: str) -> Dict[str, Any]:
-        return self._request("GET", f"/v1/auth/message?address={urllib.parse.quote(str(address))}")  # VERIFY
+    # ---- 鉴权（已对照官方 Python 鉴权指南确认）----
+    def get_auth_message(self) -> Dict[str, Any]:
+        # GET /v1/auth/message（无参数），头带 x-api-key → {"data":{"message":...}}
+        return self._request("GET", "/v1/auth/message")
 
-    def exchange_jwt(self, address: str, signature: str) -> Dict[str, Any]:
-        return self._request("POST", "/v1/auth/login", {"address": address, "signature": signature})  # VERIFY
+    def exchange_jwt(self, signer: str, message: str, signature: str) -> Dict[str, Any]:
+        # POST /v1/auth，body {signer, message, signature} → {"data":{"token":...}}
+        return self._request("POST", "/v1/auth", {"signer": signer, "message": message, "signature": signature})
 
     # ---- 订单 ----
     def create_order(self, body: Dict[str, Any]) -> Dict[str, Any]:

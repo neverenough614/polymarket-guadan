@@ -128,12 +128,12 @@ class FakeAuthRest:
         self.jwt_provider = None
         self._token_resp = token_resp
         self.auth_message_calls = 0
-    def get_auth_message(self, address):
+    def get_auth_message(self):
         if self.jwt_provider:
             self.jwt_provider()
         self.auth_message_calls += 1
         return {"data": {"message": "sign-me"}}
-    def exchange_jwt(self, address, signature):
+    def exchange_jwt(self, signer, message, signature):
         if self.jwt_provider:
             self.jwt_provider()
         return self._token_resp

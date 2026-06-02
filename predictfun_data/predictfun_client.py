@@ -82,12 +82,13 @@ class PredictFunClient:
     def authenticate(self) -> None:
         self._authenticating = True
         try:
-            msg_resp = self.rest.get_auth_message(self.address)
-            message = msg_resp.get("data", msg_resp).get("message", msg_resp.get("message"))  # VERIFY
+            msg_resp = self.rest.get_auth_message()
+            message = msg_resp.get("data", msg_resp).get("message")
             signature = self._signer(message)
-            tok_resp = self.rest.exchange_jwt(self.address, signature)
+            # signer 字段：EOA 模式=签名地址；智能账户模式=智能账户地址（self.address 已据此解析）
+            tok_resp = self.rest.exchange_jwt(self.address, message, signature)
             data = tok_resp.get("data", tok_resp)
-            self._jwt = data.get("token") or data.get("jwt")  # VERIFY
+            self._jwt = data.get("token") or data.get("jwt")
             if not self._jwt:
                 raise RuntimeError(f"authenticate: 响应中未找到 token，fields={list(data.keys())}")
             # 过期时间：缺省给 1 小时安全窗
