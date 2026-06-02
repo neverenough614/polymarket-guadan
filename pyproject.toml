@@ -31,6 +31,9 @@ dev = [
     "black==24.4.2",
     "pytest==8.2.2",
 ]
+predictfun = [
+    "predict-sdk>=0.0.16",
+]
 
 [build-system]
 requires = ["hatchling"]
