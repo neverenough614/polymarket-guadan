@@ -119,3 +119,55 @@ def test_remove_orders_batches_over_100():
 def test_get_usdt_balance_delegates_to_builder():
     c = make_client()
     assert c.get_usdt_balance() == 123.5
+
+
+class FakeAuthRest:
+    """模拟生产 REST：auth 端点内部会调用 jwt_provider（即 _headers 的行为），用于复现递归路径。"""
+    def __init__(self, token_resp):
+        self.jwt_provider = None
+        self._token_resp = token_resp
+        self.auth_message_calls = 0
+    def get_auth_message(self, address):
+        if self.jwt_provider:
+            self.jwt_provider()
+        self.auth_message_calls += 1
+        return {"data": {"message": "sign-me"}}
+    def exchange_jwt(self, address, signature):
+        if self.jwt_provider:
+            self.jwt_provider()
+        return self._token_resp
+
+
+def test_authenticate_no_infinite_recursion():
+    rest = FakeAuthRest({"data": {"token": "JWT-OK", "expiresAt": 9999999999}})
+    c = PredictFunClient(network="testnet", builder=FakeBuilder(), rest=rest,
+                         signer=lambda m: "0xSIG", address="0xMe", skip_auth=True)
+    rest.jwt_provider = c._ensure_jwt  # 复现生产 wiring
+    c.authenticate()  # 必须不 RecursionError
+    assert rest.auth_message_calls == 1
+    assert c._ensure_jwt() == "JWT-OK"
+
+
+def test_authenticate_raises_when_token_missing():
+    import pytest
+    rest = FakeAuthRest({"data": {}})  # 无 token/jwt 字段
+    c = PredictFunClient(network="testnet", builder=FakeBuilder(), rest=rest,
+                         signer=lambda m: "0xSIG", address="0xMe", skip_auth=True)
+    rest.jwt_provider = c._ensure_jwt
+    with pytest.raises(RuntimeError):
+        c.authenticate()
+
+
+def test_remove_orders_partial_failure_records_errors():
+    c = make_client()
+    calls = {"n": 0}
+    def flaky(chunk):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("chunk2 failed")
+        return {"removed": list(chunk), "noop": []}
+    c.rest.remove_orders = flaky
+    out = c.remove_orders([str(i) for i in range(150)])
+    assert out["success"] is False
+    assert len(out["removed"]) == 100      # chunk1 succeeded, recorded
+    assert len(out["errors"]) == 1         # chunk2 failure recorded

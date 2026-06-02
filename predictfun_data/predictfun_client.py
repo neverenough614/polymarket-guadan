@@ -33,6 +33,7 @@ class PredictFunClient:
 
         self._jwt: Optional[str] = None
         self._jwt_exp: float = 0.0
+        self._authenticating: bool = False
         if not skip_auth:
             self.authenticate()
 
@@ -79,17 +80,25 @@ class PredictFunClient:
 
     # ---- 鉴权 ----
     def authenticate(self) -> None:
-        msg_resp = self.rest.get_auth_message(self.address)
-        message = msg_resp.get("data", msg_resp).get("message", msg_resp.get("message"))  # VERIFY
-        signature = self._signer(message)
-        tok_resp = self.rest.exchange_jwt(self.address, signature)
-        data = tok_resp.get("data", tok_resp)
-        self._jwt = data.get("token") or data.get("jwt")  # VERIFY
-        # 过期时间：缺省给 1 小时安全窗
-        exp = data.get("expiresAt") or data.get("exp")
-        self._jwt_exp = float(exp) if exp else time.time() + 3600
+        self._authenticating = True
+        try:
+            msg_resp = self.rest.get_auth_message(self.address)
+            message = msg_resp.get("data", msg_resp).get("message", msg_resp.get("message"))  # VERIFY
+            signature = self._signer(message)
+            tok_resp = self.rest.exchange_jwt(self.address, signature)
+            data = tok_resp.get("data", tok_resp)
+            self._jwt = data.get("token") or data.get("jwt")  # VERIFY
+            if not self._jwt:
+                raise RuntimeError(f"authenticate: 响应中未找到 token，fields={list(data.keys())}")
+            # 过期时间：缺省给 1 小时安全窗
+            exp = data.get("expiresAt") or data.get("exp")
+            self._jwt_exp = float(exp) if exp else time.time() + 3600
+        finally:
+            self._authenticating = False
 
     def _ensure_jwt(self) -> Optional[str]:
+        if self._authenticating:
+            return self._jwt
         if self._jwt is None or time.time() >= self._jwt_exp - 30:
             self.authenticate()
         return self._jwt
@@ -178,12 +187,16 @@ class PredictFunClient:
 
     # ---- 撤单 ----
     def remove_orders(self, ids: List[str]) -> Dict[str, Any]:
-        removed, noop = [], []
-        for chunk in batch_ids([str(i) for i in ids if i], 100):
-            r = self.rest.remove_orders(chunk)
-            removed.extend(r.get("removed", []))
-            noop.extend(r.get("noop", []))
-        return {"success": True, "removed": removed, "noop": noop}
+        removed, noop, errors = [], [], []
+        clean = [str(i) for i in ids if str(i).strip()]
+        for chunk in batch_ids(clean, 100):
+            try:
+                r = self.rest.remove_orders(chunk)
+                removed.extend(r.get("removed", []))
+                noop.extend(r.get("noop", []))
+            except Exception as e:
+                errors.append({"ids": chunk, "error": str(e)})
+        return {"success": not errors, "removed": removed, "noop": noop, "errors": errors}
 
     # ---- 资金 / 授权 / 仓位 ----
     def get_usdt_balance(self) -> float:

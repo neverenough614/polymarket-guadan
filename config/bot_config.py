@@ -92,6 +92,10 @@ class PredictFunConfig:
     tick_size: float = 0.01
     default_yield_bearing: bool = False
     rate_limit_per_min: int = 240
+    # 派生字段：由 __post_init__ 依据 network 填充
+    base_url: str = field(init=False, default="")
+    chain_id: int = field(init=False, default=0)
+    requires_api_key: bool = field(init=False, default=False)
 
     def __post_init__(self):
         if self.network not in PREDICTFUN_ENDPOINTS:

@@ -35,7 +35,11 @@ def side_from_sdk(v: int) -> str:
 
 
 def _canon_side(raw_side: str) -> str:
-    return _RAW_SIDE_TO_CANON[str(raw_side).upper()]
+    key = str(raw_side).upper()
+    canon = _RAW_SIDE_TO_CANON.get(key)
+    if canon is None:
+        raise ValueError(f"未知 side 值: {raw_side!r}")
+    return canon
 
 
 def _f(x, default=0.0) -> float:
@@ -69,8 +73,11 @@ def normalize_orderbook(raw: Dict[str, Any]) -> NormalizedBook:
     def levels(rows):
         out = []
         for row in rows or []:
-            # 形如 [price, size]
-            p, s = row[0], row[1]
+            # 形如 [price, size]（数组）或 {"price":..,"size":..}（对象）；VERIFY 实际格式
+            if isinstance(row, (list, tuple)):
+                p, s = row[0], row[1]
+            else:
+                p, s = row.get("price"), row.get("size")
             out.append(BookLevel(_f(p), _f(s)))
         return out
     return NormalizedBook(

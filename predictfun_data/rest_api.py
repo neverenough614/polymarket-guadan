@@ -4,6 +4,7 @@ transport 为注入点：默认用 requests，测试注入 fake。所有端点�
 待 OpenAPI 确认的路径标注 # VERIFY。
 """
 import time
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
@@ -35,7 +36,7 @@ def _requests_transport(method, url, headers, json_body) -> HttpResp:
 
 
 class _RateLimiter:
-    """简单令牌桶：每分钟 n 次，超额则 sleep。"""
+    """固定速率节流：保证请求间最小间隔 = 60/per_min 秒。"""
     def __init__(self, per_min: int):
         self._min_interval = 60.0 / max(1, per_min)
         self._last = 0.0
@@ -89,7 +90,7 @@ class PredictRest:
 
     # ---- 鉴权（路径 VERIFY）----
     def get_auth_message(self, address: str) -> Dict[str, Any]:
-        return self._request("GET", f"/v1/auth/message?address={address}")  # VERIFY
+        return self._request("GET", f"/v1/auth/message?address={urllib.parse.quote(str(address))}")  # VERIFY
 
     def exchange_jwt(self, address: str, signature: str) -> Dict[str, Any]:
         return self._request("POST", "/v1/auth/login", {"address": address, "signature": signature})  # VERIFY
@@ -120,6 +121,4 @@ class PredictRest:
 
 def _qs(params: Dict[str, Any]) -> str:
     items = [(k, v) for k, v in (params or {}).items() if v is not None]
-    if not items:
-        return ""
-    return "?" + "&".join(f"{k}={v}" for k, v in items)
+    return ("?" + urllib.parse.urlencode(items)) if items else ""
