@@ -109,9 +109,10 @@ class PredictFunClient:
         yb = self._yield_default if is_yield_bearing is None else is_yield_bearing
         try:
             sdk_side, LimitHelperInput, BuildOrderInput = self._sdk_order_types(side)
+            pps_wei = units.price_per_share_wei(price, self.cfg.tick_size)
             amounts = self._builder.get_limit_order_amounts(LimitHelperInput(
                 side=sdk_side,
-                price_per_share_wei=units.price_per_share_wei(price, self.cfg.tick_size),
+                price_per_share_wei=pps_wei,
                 quantity_wei=units.shares_to_wei(size),
             ))
             order = self._builder.build_order(order_type, BuildOrderInput(
@@ -123,7 +124,8 @@ class PredictFunClient:
             ))
             typed = self._builder.build_typed_data(order, is_neg_risk=neg_risk, is_yield_bearing=yb)
             signed = self._builder.sign_typed_data_order(typed)
-            body = self._order_body(signed, order_type, neg_risk, yb)
+            strategy = "LIMIT" if str(order_type).upper() == "LIMIT" else "MARKET"
+            body = self._order_body(signed, pps_wei, strategy)
             resp = self.rest.create_order(body)
             data = resp.get("data", resp)
             return {"status": "live", "order_id": str(data.get("id") or data.get("hash") or ""),
@@ -151,16 +153,15 @@ class PredictFunClient:
             sdk_side = "BUY" if side_str == "BUY" else "SELL"
             return sdk_side, _NS, _NS
 
-    def _order_body(self, signed, order_type, neg_risk, yield_bearing) -> Dict[str, Any]:
-        # VERIFY: 确切 body 字段对照 OpenAPI；此处为单点修正位置
+    def _order_body(self, signed, price_per_share_wei, strategy) -> Dict[str, Any]:
+        # 真实结构（predict.fun 文档）：{data:{order:{...signedOrder, hash}, pricePerShare, strategy}}
+        # VERIFY: pricePerShare 单位(wei?)、order id 响应字段、确切 POST 路径——首次实盘只读/小单时核对
         order_obj = signed.to_dict() if hasattr(signed, "to_dict") else dict(getattr(signed, "__dict__", {}))
-        return {
-            "order": order_obj,
-            "signature": signed.signature,
-            "orderType": order_type,
-            "isNegRisk": neg_risk,
-            "isYieldBearing": yield_bearing,
-        }
+        if hasattr(signed, "signature") and "signature" not in order_obj:
+            order_obj["signature"] = signed.signature
+        if hasattr(signed, "hash") and "hash" not in order_obj:
+            order_obj["hash"] = signed.hash
+        return {"data": {"order": order_obj, "pricePerShare": str(price_per_share_wei), "strategy": strategy}}
 
     # ---- 查询（归一化）----
     def get_orderbook(self, market_id):
@@ -200,7 +201,8 @@ class PredictFunClient:
 
     # ---- 资金 / 授权 / 仓位 ----
     def get_usdt_balance(self) -> float:
-        return float(self._builder.balance_of("USDT"))
+        # 智能账户模式下资金在 self.address（PREDICTFUN_ACCOUNT）；EOA 模式即签名地址
+        return float(self._builder.balance_of("USDT", address=self.address))
 
     def set_approvals(self) -> Any:
         return self._builder.set_approvals(is_yield_bearing=self._yield_default)

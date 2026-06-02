@@ -46,7 +46,7 @@ class FakeBuilder:
         return {"typed": "data", "is_neg_risk": is_neg_risk, "is_yield_bearing": is_yield_bearing}
     def sign_typed_data_order(self, _typed):
         return FakeSignedOrder()
-    def balance_of(self, _sym):
+    def balance_of(self, _sym, address=None):
         return 123.5
 
 
@@ -85,8 +85,9 @@ def test_create_order_builds_signed_body_and_normalizes():
     assert out["status"] == "live"
     assert out["order_id"] == "ord1"
     body = c.rest.created[0]
-    # body 必含签名与 typed data（字段名 VERIFY，但结构存在）
-    assert body["signature"] == "0xSIG"
+    assert body["data"]["strategy"] == "LIMIT"
+    assert body["data"]["order"]["signature"] == "0xSIG"
+    assert "pricePerShare" in body["data"]
 
 
 def test_create_order_error_returns_error_status():
