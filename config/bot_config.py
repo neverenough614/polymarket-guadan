@@ -79,6 +79,29 @@ class ImbalanceConfig:
     ENABLE_IMBALANCE_DETECTION: bool = True
 
 
+PREDICTFUN_ENDPOINTS = {
+    "testnet": {"base_url": "https://api-testnet.predict.fun", "chain_id": 97, "requires_api_key": False},
+    "mainnet": {"base_url": "https://api.predict.fun", "chain_id": 56, "requires_api_key": True},
+}
+
+
+@dataclass
+class PredictFunConfig:
+    """predict.fun 平台配置（BNB 链）。network 决定 URL/链/是否需 API key。"""
+    network: str = "testnet"
+    tick_size: float = 0.01
+    default_yield_bearing: bool = False
+    rate_limit_per_min: int = 240
+
+    def __post_init__(self):
+        if self.network not in PREDICTFUN_ENDPOINTS:
+            raise ValueError(f"未知 network: {self.network}（应为 testnet|mainnet）")
+        ep = PREDICTFUN_ENDPOINTS[self.network]
+        self.base_url = ep["base_url"]
+        self.chain_id = ep["chain_id"]
+        self.requires_api_key = ep["requires_api_key"]
+
+
 @dataclass
 class BotConfig:
     """总配置，聚合各子配置"""
