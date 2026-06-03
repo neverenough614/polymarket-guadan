@@ -153,6 +153,22 @@ class PredictFunSelectionConfig:
 
 
 @dataclass
+class PredictFunMonitorConfig:
+    """predict.fun 监控/防御配置（SP5）—— 基调：稳挂少动，避开反作弊清零。
+
+    predict.fun 奖励=PP 积分，且会对"撤单滥用/挂不可成交单"整号清零。故防御逻辑
+    与 Polymarket 现网相反：不抢档、不高频撤重挂，只在"订单脱离奖励价带"或"一侧成交"
+    时克制地补救，并受冷却 + 全局撤单预算双重限流。无 WebSocket，用温和轮询。
+    """
+    poll_interval_sec: int = 90          # 轮询间隔（温和；240/min 限速下绰绰有余）
+    token_cooldown_sec: int = 300        # 同一 token 两次撤/挂动作最小间隔（5 分钟）
+    max_cancels_per_hour: int = 60       # 全局滚动 1h 撤单预算上限（反作弊护栏）
+    recenter_deadband_ticks: float = 1.0 # 出带滞回：超出奖励价带 >此 tick 数才重心（防抖）
+    refill_on_fill: bool = True          # 一侧完全成交后补回该侧（维持双边=最大奖励）
+    min_two_sided: bool = True           # 缺一侧即视为需补单（双边才拿满奖励）
+
+
+@dataclass
 class BotConfig:
     """总配置，聚合各子配置"""
     sheet: SheetConfig = field(default_factory=SheetConfig)
@@ -163,6 +179,7 @@ class BotConfig:
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
     predictfun_discovery: PredictFunDiscoveryConfig = field(default_factory=PredictFunDiscoveryConfig)
     predictfun_selection: PredictFunSelectionConfig = field(default_factory=PredictFunSelectionConfig)
+    predictfun_monitor: PredictFunMonitorConfig = field(default_factory=PredictFunMonitorConfig)
 
 
 # 全局配置实例
