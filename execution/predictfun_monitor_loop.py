@@ -16,29 +16,26 @@ from config.bot_config import cfg
 from orderbook.analyzer import get_orderbook_info
 from predictfun_data.monitor import decide_action, NONE
 from predictfun_data.churn_guard import ChurnGuard
-from predictfun_data.placer import place_for_token
+from predictfun_data.placer import place_bid
 
 
 def evaluate_and_execute(
     backend: Any,
     token_info: Dict[str, Any],
     my_bid: Optional[float],
-    my_ask: Optional[float],
     churn: ChurnGuard,
     now: float,
     mcfg=None,
 ) -> Dict[str, Any]:
-    """单 token：评估并（受 churn 放行后）执行。返回结果字典（便于日志/测试）。"""
+    """单 token：评估其买单并（受 churn 放行后）执行。my_bid=我在该 token 的买价(None=无单)。"""
     mcfg = mcfg or cfg.predictfun_monitor
     token_id = token_info["token_id"]
     max_spread = token_info.get("max_spread")
 
-    book, best_bid, best_ask, mid = get_orderbook_info(backend, token_id)
+    _book, best_bid, best_ask, mid = get_orderbook_info(backend, token_id)
     decision = decide_action(
-        my_bid, my_ask, mid, max_spread,
+        my_bid, mid, max_spread,
         deadband_ticks=mcfg.recenter_deadband_ticks,
-        refill_on_fill=mcfg.refill_on_fill,
-        min_two_sided=mcfg.min_two_sided,
     )
     if decision.action == NONE:
         return {"token_id": token_id, "action": NONE, "reason": decision.reason}
@@ -47,7 +44,6 @@ def evaluate_and_execute(
         return {"token_id": token_id, "action": "SKIPPED", "wanted": decision.action,
                 "reason": "churn cooldown/budget"}
 
-    placed = []
     if decision.cancel_first:
         try:
             backend.cancel_all_asset(token_id)
@@ -57,16 +53,11 @@ def evaluate_and_execute(
         # 否则冷却未武装→下轮可能再撤→撤单循环→predict.fun 反作弊清零。
         churn.record(token_id, now, count_as_cancel=True)
 
-    sides = set()
-    if decision.place_buy:
-        sides.add("BUY")
-    if decision.place_sell:
-        sides.add("SELL")
     try:
-        placed = place_for_token(backend, token_info, best_bid, best_ask, sides)
+        placed = place_bid(backend, token_info, best_bid, best_ask)
     except Exception as e:
-        # 补单失败不致命：撤单已记账、冷却已武装；下轮缺侧走 REFILL(不撤)，不会撤单循环。
-        placed = [{"status": "error", "error": str(e)}]
+        # 补单失败不致命：撤单已记账、冷却已武装；下轮无单走 REFILL(不撤)，不会撤单循环。
+        placed = {"status": "error", "error": str(e)}
 
     if not decision.cancel_first:   # REFILL：纯补单，结束时记冷却(不计撤单预算)
         churn.record(token_id, now, count_as_cancel=False)
@@ -100,10 +91,9 @@ async def monitor_loop(
             acted = 0
             for tid, token_info in by_id.items():
                 info = grouped.get(tid, {})
-                my_bid = info.get("best_bid")
-                my_ask = info.get("best_ask")
+                my_bid = info.get("best_bid")   # 我在该 token 上的买价(只挂买单)
                 res = await asyncio.to_thread(
-                    evaluate_and_execute, backend, token_info, my_bid, my_ask, churn, now_fn(), mcfg
+                    evaluate_and_execute, backend, token_info, my_bid, churn, now_fn(), mcfg
                 )
                 if res.get("action") not in (NONE, "SKIPPED"):
                     acted += 1

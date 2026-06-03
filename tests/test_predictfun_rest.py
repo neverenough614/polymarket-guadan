@@ -44,6 +44,40 @@ def test_non_2xx_raises_predict_api_error():
     assert ei.value.status == 500
 
 
+class FlakyTransport:
+    """前 fail_times 次抛网络异常,之后正常返回。"""
+    def __init__(self, fail_times, ok_body):
+        self.fail_times = fail_times
+        self.ok_body = ok_body
+        self.attempts = 0
+
+    def __call__(self, method, url, headers, json_body):
+        self.attempts += 1
+        if self.attempts <= self.fail_times:
+            raise ConnectionError("read timed out")
+        return HttpResp(200, self.ok_body)
+
+
+def test_send_retries_transient_network_errors(monkeypatch):
+    import predictfun_data.rest_api as rapi
+    monkeypatch.setattr(rapi.time, "sleep", lambda *_: None)   # 不真睡
+    t = FlakyTransport(fail_times=2, ok_body={"success": True, "data": {"marketId": 9}})
+    rest = make_rest(t, max_network_retries=3)
+    out = rest.get_market(9)
+    assert out["data"]["marketId"] == 9
+    assert t.attempts == 3                 # 失败2次+成功1次
+
+
+def test_send_gives_up_after_max_retries(monkeypatch):
+    import predictfun_data.rest_api as rapi
+    monkeypatch.setattr(rapi.time, "sleep", lambda *_: None)
+    t = FlakyTransport(fail_times=99, ok_body={})
+    rest = make_rest(t, max_network_retries=3)
+    with pytest.raises(ConnectionError):
+        rest.get_market(9)
+    assert t.attempts == 3                  # 重试上限
+
+
 def test_401_triggers_reauth_then_retries_once():
     t = FakeTransport([(401, {"error": "expired"}), (200, {"success": True, "data": []})])
     reauth_calls = []

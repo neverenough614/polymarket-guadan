@@ -27,7 +27,7 @@ class PredictApiError(Exception):
 
 def _requests_transport(method, url, headers, json_body) -> HttpResp:
     import requests
-    resp = requests.request(method, url, headers=headers, json=json_body, timeout=10)
+    resp = requests.request(method, url, headers=headers, json=json_body, timeout=20)
     try:
         body = resp.json()
     except Exception:
@@ -65,6 +65,7 @@ class PredictRest:
         transport: Optional[Callable] = None,
         throttle: Optional[Callable[[], None]] = None,
         rate_limit_per_min: int = 240,
+        max_network_retries: int = 3,
     ):
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -72,6 +73,7 @@ class PredictRest:
         self._on_unauthorized = on_unauthorized or (lambda: None)
         self._transport = transport or _requests_transport
         self._throttle = throttle or _RateLimiter(rate_limit_per_min)
+        self._max_network_retries = max(1, int(max_network_retries))
 
     # ---- 核心请求 ----
     def _headers(self) -> Dict[str, str]:
@@ -83,10 +85,22 @@ class PredictRest:
             h["x-api-key"] = self._api_key  # 主网必需；测试网可省
         return h
 
+    def _send(self, method: str, url: str, json_body) -> HttpResp:
+        """调用传输层；对瞬时网络错误(超时/断连)重试若干次再放弃。"""
+        last = None
+        for i in range(self._max_network_retries):
+            try:
+                return self._transport(method, url, self._headers(), json_body)
+            except Exception as e:   # 传输层=网络边界,重试瞬时故障(ReadTimeout/ConnectionError 等)
+                last = e
+                if i < self._max_network_retries - 1:
+                    time.sleep(1.0 * (i + 1))
+        raise last
+
     def _request(self, method: str, path: str, json_body=None, _retried=False) -> Dict[str, Any]:
         self._throttle()
         url = f"{self.base_url}{path}"
-        resp = self._transport(method, url, self._headers(), json_body)
+        resp = self._send(method, url, json_body)
         if resp.status_code == 401 and not _retried:
             self._on_unauthorized()
             return self._request(method, path, json_body, _retried=True)

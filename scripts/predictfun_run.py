@@ -30,7 +30,7 @@ from execution.factory import create_execution_backend
 from execution.predictfun_monitor_loop import monitor_loop
 from predictfun_data.strategy_loader import load_predictfun_markets
 from predictfun_data.churn_guard import ChurnGuard
-from predictfun_data.placer import compute_quotes, place_for_token
+from predictfun_data.placer import compute_bid, place_bid
 from orderbook.analyzer import get_orderbook_info
 
 
@@ -45,31 +45,31 @@ def _parse_args(argv):
     return mode, limit
 
 
-def _one_per_market(backend, tokens):
-    """predict.fun 每市场只有一本簿 → 每市场只报价一个 outcome(优先 book 原生/YES 侧),
-    两侧(bid+ask)挂在这一本簿上即满足"双边"奖励要求。避免同时报价 YES+NO 造成
-    双倍资金占用与同簿自成交风险。未注册的 token 原样保留(异常兜底)。"""
-    chosen = {}            # market_id -> token
-    is_native = {}         # market_id -> bool
-    extras = []            # 未注册的 token（异常兜底）
+def _limit_markets(backend, tokens, n_markets):
+    """按市场分组(YES+NO 两个 token 同属一市场),取前 n_markets 个市场的全部 token。
+
+    predict.fun 双边=买 YES + 买 NO(买 NO 即卖 YES),故每市场两个 outcome 都要挂买单。
+    n_markets<=0 表示不限。返回展平后的 token 列表(每市场两张买单)。
+    """
+    by_market = {}      # market_id -> [tokens]，保持出现顺序
+    order = []
     for t in tokens:
         meta = backend.meta_for(t["token_id"])
-        if meta is None:
-            extras.append(t)
-            continue
-        mk = meta.market_id
-        native = not meta.is_complement
-        if mk not in chosen:
-            chosen[mk] = t
-            is_native[mk] = native
-        elif native and not is_native[mk]:
-            chosen[mk] = t     # native(YES) 覆盖先前的 complement(NO)
-            is_native[mk] = True
-    return list(chosen.values()) + extras
+        mk = meta.market_id if meta is not None else ("u", t["token_id"])
+        if mk not in by_market:
+            by_market[mk] = []
+            order.append(mk)
+        by_market[mk].append(t)
+    if n_markets and n_markets > 0:
+        order = order[:n_markets]
+    out = []
+    for mk in order:
+        out.extend(by_market[mk])
+    return out, len(order)
 
 
-def _setup(one_per_market=True):
-    """建 backend、注册全量市场、载入策略 token（默认每市场只留一个 outcome）。"""
+def _setup():
+    """建 backend、注册全量市场、载入策略 token(YES+NO 都保留)。"""
     backend = create_execution_backend("predictfun")
     client = backend.raw_client
     print(f"[setup] 账户={client.address}  USDT={client.get_usdt_balance()}")
@@ -77,16 +77,14 @@ def _setup(one_per_market=True):
     n = backend.refresh_markets(status="OPEN")
     print(f"[setup] 已注册 {n} 个 outcome token")
     tokens = load_predictfun_markets()
-    print(f"[setup] 载入策略 token={len(tokens)}")
-    if one_per_market:
-        tokens = _one_per_market(backend, tokens)
-        print(f"[setup] 每市场单 outcome 去重后={len(tokens)}（每市场两侧挂在同一本簿）")
+    print(f"[setup] 载入策略 token={len(tokens)}（YES+NO 各一,双边=买两个 outcome）")
     return backend, tokens
 
 
 def _plan(backend, tokens):
-    print(f"\n=== PLAN（只读,不下单）共 {len(tokens)} 个 token ===")
+    print(f"\n=== PLAN（只读,不下单）{len(tokens)} 个 token（每 token 一张买单,YES+NO 构成双边）===")
     quotable = 0
+    est_capital = 0.0
     for i, t in enumerate(tokens):
         tid = t["token_id"]
         _book, bb, ba, mid = get_orderbook_info(backend, tid)
@@ -94,31 +92,31 @@ def _plan(backend, tokens):
         meta = backend.meta_for(tid)
         tick = getattr(meta, "tick_size", 0.01) if meta else 0.01
         size = max(100.0, float(t.get("min_size", 0) or 0))
-        q = compute_quotes(bb or 0, ba or 0, ms, tick) if (bb and ba) else None
-        if q:
+        buy = compute_bid(bb or 0, ba or 0, ms, tick) if (bb and ba) else None
+        if buy is not None:
             quotable += 1
-            tag = f"买 {q[0]:.3f} / 卖 {q[1]:.3f}  价值≈{q[0]*size:.1f}+{q[1]*size:.1f} USDT"
+            est_capital += buy * size
+            tag = f"买 {buy:.3f}  占用≈{buy*size:.1f} USDT"
         else:
             tag = "—（单侧簿/交叉,跳过）"
-        print(f"  [{i+1}/{len(tokens)}] {str(t['question'])[:36]} [{t['token_type']}] "
+        print(f"  [{i+1}/{len(tokens)}] {str(t['question'])[:34]} [{t['token_type']}] "
               f"mid={mid if mid is None else round(mid,3)} band±{ms} → {tag}  size≈{size:.0f}")
-    print(f"=== PLAN 结束：{quotable}/{len(tokens)} 可双边报价。确认后用 live/once + --limit 实盘 ===")
+    print(f"=== PLAN 结束：{quotable}/{len(tokens)} 可报价，预计占用合计≈{est_capital:.1f} USDT。"
+          f"确认后用 live/once + --limit 实盘 ===")
 
 
 def _place_once(backend, tokens):
-    print(f"\n=== 初挂双边（实盘,{len(tokens)} 个 token）===")
+    print(f"\n=== 初挂（实盘,{len(tokens)} 个 token,各一张买单）===")
     ok = skip = 0
     for i, t in enumerate(tokens):
         _book, bb, ba, _mid = get_orderbook_info(backend, t["token_id"])
-        placed = place_for_token(backend, t, bb or 0, ba or 0, {"BUY", "SELL"})
-        live = [p for p in placed if p.get("status") == "placed"]
-        if live:
+        res = place_bid(backend, t, bb or 0, ba or 0)
+        if res.get("status") == "placed":
             ok += 1
-            info = " ".join(f"{p['side']}@{p['price']:.3f}" for p in live)
-            print(f"  [{i+1}/{len(tokens)}] ✅ {str(t['question'])[:34]} → {info}")
+            print(f"  [{i+1}/{len(tokens)}] ✅ {str(t['question'])[:32]} [{t['token_type']}] BUY@{res['price']:.3f}×{res['size']:.0f}")
         else:
             skip += 1
-            print(f"  [{i+1}/{len(tokens)}] ⚠️ {str(t['question'])[:34]} → {placed[0].get('status') if placed else 'none'}")
+            print(f"  [{i+1}/{len(tokens)}] ⚠️ {str(t['question'])[:32]} [{t['token_type']}] → {res.get('status')}")
     print(f"=== 初挂完成：成功 {ok}，跳过/失败 {skip} ===")
     return ok, skip
 
@@ -151,8 +149,8 @@ def main() -> int:
         print("✗ 实盘必须带 --limit N 控制市场数（防敞口失控）。例：live --limit 1")
         return 1
     if limit is not None:
-        tokens = tokens[:limit]
-        print(f"[runner] 限定前 {len(tokens)} 个市场")
+        tokens, n_mk = _limit_markets(backend, tokens, limit)
+        print(f"[runner] 限定前 {n_mk} 个市场 → {len(tokens)} 个 token（每市场买 YES+买 NO）")
 
     if mode == "plan":
         _plan(backend, tokens); return 0

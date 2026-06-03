@@ -1,33 +1,33 @@
-"""SP收尾: predict.fun 报价器 —— 贴 mid 双边、夹进奖励带、不交叉、薄簿照报。"""
-from predictfun_data.placer import compute_quotes, place_for_token
+"""收尾: predict.fun 报价器 —— 只买不裸卖,贴 bid、夹进奖励带、薄簿照报。
+
+双边靠"买 YES + 买 NO"(买 NO=卖 YES)实现,故每个 token 只算/挂一张买单。
+"""
+from predictfun_data.placer import compute_bid, place_bid
 
 
-def test_quotes_improve_one_tick_inside_book():
-    # 实测 Starmer：bids 0.102, asks 0.11，该市场 tick=0.001 → 改善 1 tick：买 0.103 / 卖 0.109
-    q = compute_quotes(0.102, 0.11, max_spread=0.06, tick_size=0.001, improve_ticks=1)
-    assert q == (0.103, 0.109)
+def test_bid_improves_one_tick_inside_book():
+    # Starmer YES：bids 0.102, asks 0.11，tick=0.001 → 改善 1 tick：买 0.103
+    assert compute_bid(0.102, 0.11, max_spread=0.06, tick_size=0.001, improve_ticks=1) == 0.103
 
 
-def test_quotes_join_touch_when_too_tight_to_improve():
-    # 1 tick 宽簿：改善会交叉 → 退为贴盘口
-    q = compute_quotes(0.10, 0.11, max_spread=0.06, tick_size=0.01, improve_ticks=1)
-    assert q == (0.10, 0.11)
+def test_bid_joins_touch_when_too_tight_to_improve():
+    # 1 tick 宽簿：改善会越过卖一 → 退为贴买一
+    assert compute_bid(0.10, 0.11, max_spread=0.06, tick_size=0.01, improve_ticks=1) == 0.10
 
 
-def test_quotes_clamped_into_reward_band():
-    # 宽簿 bb0.20/ba0.80,mid0.5,带0.06 → 夹进 [0.44,0.56]
-    q = compute_quotes(0.20, 0.80, max_spread=0.06, tick_size=0.01)
-    assert q == (0.44, 0.56)
+def test_bid_clamped_to_reward_band_lower_edge():
+    # 宽簿 bb0.20/ba0.80,mid0.5,带0.06 → 买单不得低于 mid-band=0.44；贴买一0.21会被抬到0.44
+    assert compute_bid(0.20, 0.80, max_spread=0.06, tick_size=0.01) == 0.44
 
 
-def test_quotes_none_when_one_sided_or_crossed():
-    assert compute_quotes(0.0, 0.11, 0.06, 0.01) is None    # 无买侧
-    assert compute_quotes(0.10, 0.0, 0.06, 0.01) is None    # 无卖侧
-    assert compute_quotes(0.55, 0.50, 0.06, 0.01) is None   # 交叉簿
+def test_bid_none_when_one_sided_or_crossed():
+    assert compute_bid(0.0, 0.11, 0.06, 0.01) is None     # 无买侧
+    assert compute_bid(0.10, 0.0, 0.06, 0.01) is None     # 无卖侧
+    assert compute_bid(0.55, 0.50, 0.06, 0.01) is None    # 交叉簿
 
 
 class _Meta:
-    tick_size = 0.001     # 该市场 3 位小数(decimalPrecision=3)
+    tick_size = 0.001     # 3 位小数市场(decimalPrecision=3)
 
 
 class FakeBackend:
@@ -42,24 +42,21 @@ class FakeBackend:
 TOKEN = {"token_id": "T", "max_spread": 0.06, "min_size": 150}
 
 
-def test_place_for_token_both_sides_at_quotes():
+def test_place_bid_places_single_buy_at_bid():
     be = FakeBackend()
-    out = place_for_token(be, TOKEN, 0.102, 0.11, {"BUY", "SELL"})
-    assert {o["side"] for o in out} == {"BUY", "SELL"}
-    assert all(o["status"] == "placed" for o in out)
-    sent = {c["side"]: c for c in be.created}
-    assert sent["BUY"]["price"] == 0.103 and sent["SELL"]["price"] == 0.109
-    assert sent["BUY"]["size"] == 150.0          # shareThreshold(min_size)
+    res = place_bid(be, TOKEN, 0.102, 0.11)
+    assert res["status"] == "placed" and res["side"] == "BUY"
+    assert be.created == [{"side": "BUY", "price": 0.103, "size": 150.0}]   # tick=0.001, size=shareThreshold
 
 
-def test_place_for_token_only_requested_side():
+def test_place_bid_never_sells():
     be = FakeBackend()
-    place_for_token(be, TOKEN, 0.102, 0.11, {"BUY"})
-    assert [c["side"] for c in be.created] == ["BUY"]
+    place_bid(be, TOKEN, 0.102, 0.11)
+    assert all(c["side"] == "BUY" for c in be.created)      # 永不发 SELL（不裸卖）
 
 
-def test_place_for_token_no_quote_when_one_sided():
+def test_place_bid_no_quote_when_one_sided():
     be = FakeBackend()
-    out = place_for_token(be, TOKEN, 0.0, 0.11, {"BUY", "SELL"})
-    assert out[0]["status"] == "no_quote"
+    res = place_bid(be, TOKEN, 0.0, 0.11)
+    assert res["status"] == "no_quote"
     assert be.created == []
