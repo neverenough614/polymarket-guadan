@@ -109,6 +109,30 @@ def test_evaluate_triggers_on_front_wall_collapse_second_round():
     assert fired and reasons
 
 
+def test_static_thinness_and_imbalance_do_not_trigger_by_default():
+    # predict.fun 关键校准：簿本来就薄($21 同档)+ 极端价天然偏斜，但"无变化"→不该撤单
+    st = DefenseState()
+    thin_bids = [(0.10, 200), (0.09, 100)]   # 同档薄、买侧远小于卖侧
+    thick_asks = [(0.11, 5000), (0.12, 5000)]
+    # 第1轮建基线
+    evaluate_defense(st, thin_bids, thick_asks, my_bid=0.10, my_size=100, best_bid=0.10)
+    # 第2轮：簿不变（仍薄、仍偏斜）→ 无变化 → 不触发
+    fired, reasons = evaluate_defense(st, thin_bids, thick_asks, my_bid=0.10, my_size=100, best_bid=0.10)
+    assert not fired, f"静态薄/偏斜不该触发，却报：{reasons}"
+
+
+def test_absolute_floors_trigger_only_when_enabled():
+    from config.bot_config import PredictFunDefenseConfig
+    st = DefenseState(); st.first_run = False
+    on = PredictFunDefenseConfig(); on.use_absolute_floors = True
+    # 同档 $20 < same_safe 80：开了绝对兜底才报
+    fired_on, _ = check_bid_threats(st, my_bid=0.10, front=0.0, same=20.0, dc=on)
+    assert fired_on
+    st2 = DefenseState(); st2.first_run = False
+    fired_off, _ = check_bid_threats(st2, my_bid=0.10, front=0.0, same=20.0, dc=PredictFunDefenseConfig())
+    assert not fired_off          # 默认关 → 静态薄不报
+
+
 def test_evaluate_skips_when_no_my_bid():
     st = DefenseState()
     fired, _ = evaluate_defense(st, [(0.5, 100)], [(0.51, 100)],

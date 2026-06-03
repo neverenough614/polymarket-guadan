@@ -101,32 +101,39 @@ def check_bid_threats(
     same_safe = dc.ext_same_safe if is_extreme else dc.same_safe
     front_abs = dc.ext_front_absolute if is_extreme else dc.front_absolute
 
+    cmin = dc.change_min_depth   # 变化检测"曾有意义"门槛（薄簿上替代 same_safe）
+
+    # ① 前墙消失（change：上轮有墙→本轮暴露）
     was_behind_wall = state.last_front > dc.front_present
     now_exposed = front <= dc.front_present
     if was_behind_wall and now_exposed:
         drop = (1 - front / state.last_front) * 100 if state.last_front > 0 else 100
         reasons.append(f"[前墙消失]买单前墙 ${state.last_front:.0f}→${front:.0f}(-{drop:.0f}%)")
         triggered = True
-    if front < front_abs and state.front_hw > dc.front_absolute_ref:
+    # ② 前墙静态绝对兜底（static，默认关——薄簿会误触发）
+    if dc.use_absolute_floors and front < front_abs and state.front_hw > dc.front_absolute_ref:
         reasons.append(f"[绝对兜底]买单前墙极危 ${front:.0f}(高水位${state.front_hw:.0f})")
         triggered = True
+    # ③ 前墙高水位累计下跌（change）
     if state.front_hw > dc.front_present and front < state.front_hw * (1 - front_hw_drop):
         reasons.append(f"[高水位]买单前墙累计大跌 ${state.front_hw:.0f}→${front:.0f}")
         triggered = True
-    if front > dc.front_present:
-        if state.last_front > dc.front_present and front < state.last_front * (1 - front_drop):
-            reasons.append(f"[单轮]买单前墙塌陷 ${state.last_front:.0f}→${front:.0f}")
-            triggered = True
-    else:
-        if same < same_safe:
-            reasons.append(f"[第一档]买单同档太薄 ${same:.0f}")
-            triggered = True
-        elif state.last_same > same_safe and same < state.last_same * (1 - same_drop):
-            reasons.append(f"[第一档]买单同档被大量吃 ${state.last_same:.0f}→${same:.0f}")
-            triggered = True
-        if state.same_hw > same_safe and same < state.same_hw * (1 - same_hw_drop):
-            reasons.append(f"[高水位]同档累计被吃 ${state.same_hw:.0f}→${same:.0f}")
-            triggered = True
+    # ④ 前墙单轮塌陷（change）
+    if state.last_front > dc.front_present and front < state.last_front * (1 - front_drop):
+        reasons.append(f"[单轮]买单前墙塌陷 ${state.last_front:.0f}→${front:.0f}")
+        triggered = True
+    # ⑤ 同档静态太薄（static，默认关）
+    if dc.use_absolute_floors and front <= dc.front_present and same < same_safe:
+        reasons.append(f"[第一档]买单同档太薄 ${same:.0f}")
+        triggered = True
+    # ⑥ 同档被吃（change：曾有意义的同档相对暴跌）—— 这才是"被吃"的真信号
+    if state.last_same > cmin and same < state.last_same * (1 - same_drop):
+        reasons.append(f"[同档被吃]买单同档 ${state.last_same:.0f}→${same:.0f}")
+        triggered = True
+    # ⑦ 同档高水位累计被吃（change）
+    if state.same_hw > cmin and same < state.same_hw * (1 - same_hw_drop):
+        reasons.append(f"[高水位]同档累计被吃 ${state.same_hw:.0f}→${same:.0f}")
+        triggered = True
 
     t1, r1 = check_trend(state.front_hist, "买单前墙", dc.ext_trend_cum_drop if is_extreme else dc.trend_cum_drop, dc.trend_min_consecutive)
     if t1:
@@ -179,8 +186,8 @@ def evaluate_defense(
 
     front, same = layered_bid_depth(bids, my_bid, my_size)
 
-    # 偏斜独立判（不依赖历史，首轮也可触发）
-    imb_trig, imb_reason = check_imbalance(bids, asks, is_extreme, dc)
+    # 偏斜独立判（默认关：极端价市场天然偏斜会一直触发；需要时 config 打开）
+    imb_trig, imb_reason = check_imbalance(bids, asks, is_extreme, dc) if dc.use_imbalance else (False, "")
 
     state.front_hw = max(state.front_hw, front)
     state.same_hw = max(state.same_hw, same)

@@ -104,6 +104,8 @@ def compute_quote(
     if not max_spread or max_spread <= 0:
         return None, None, "no_band"
     mid = (bb + ba) / 2.0
+    if mid < pc.price_min or mid > pc.price_max:   # 极端价(接近 0/1)→事件跳变易被逆向吃→不报价
+        return None, None, f"extreme_price_{mid:.2f}"
     top5 = sum(p * s for p, s in bids[:5])
     if top5 < pc.min_top5_depth:
         return None, None, f"thin_top5_{top5:.0f}"

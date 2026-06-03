@@ -81,6 +81,19 @@ def test_quote_none_when_top5_too_thin():
     assert price is None and reason.startswith("thin_top5")
 
 
+def test_quote_none_when_extreme_price():
+    # mid≈0.10 < price_min 0.15 → 极端价不报价（避开事件跳变被吃）
+    book = _book([(0.099, 5000), (0.09, 5000)], [(0.11, 5000)])
+    price, _, reason = compute_quote(book, max_spread=0.06, tick_size=0.01, min_size=100, pc=PC)
+    assert price is None and reason.startswith("extreme_price")
+
+
+def test_quote_ok_for_mid_price_market():
+    book = _book([(0.49, 5000), (0.47, 5000)], [(0.51, 5000)])   # mid 0.50 在带内
+    price, _, reason = compute_quote(book, max_spread=0.06, tick_size=0.01, min_size=100, pc=PC)
+    assert reason == "ok" and price is not None
+
+
 def test_quote_none_when_no_in_band_level():
     # 买侧全在带外（best_bid 0.40 < mid-band 0.45），但前5档够厚
     book = _book([(0.40, 5000), (0.39, 5000)], [(0.60, 5000)])  # mid=0.5, band 0.06 → [0.44,0.5]

@@ -169,8 +169,11 @@ class PredictFunPlaceConfig:
     """
     min_level_depth: float = 15.0        # 单档灰尘过滤（USDT）：低于此视为无效档，跳到下一档
     min_top5_depth: float = 150.0        # 前5档累计 sanity 下限（USDT）：低于此整个市场跳过
-    size_ratio: float = 0.30             # 动态量=前3档买侧深度×此比/mid（对齐 Normal LP）
-    max_order_size: float = 500.0        # 挂单量上限（份）；下限=token 的 min_size(≥100)
+    price_min: float = 0.15              # 价带下沿：mid<此 视为极端价(接近0)→不报价（避开事件跳变被吃）
+    price_max: float = 0.85              # 价带上沿：mid>此 视为极端价(接近1)→不报价
+    allow_single_sided: bool = True       # 允许单向挂(仅一腿可报价时)：非极端+出场深度足已由 compute_quote 保证
+    size_ratio: float = 0.30             # （保留，当前不用）
+    max_order_size: float = 500.0        # （保留，当前不用；尺寸固定 min_size）
     require_exit_liquidity: bool = True   # 薄簿风控核心：买入成交后须能卖回更低 bid 平仓
     exit_max_gap: float = 0.05           # 出场：最近更低 bid 距我买价的最大间距
     exit_depth_multiplier: float = 1.0   # 出场：更低档累计深度须 ≥ 我 notional × 此值
@@ -187,13 +190,17 @@ class PredictFunMonitorConfig:
     预算用尽则降级为只告警不撤（ENABLE 风格）。无 WebSocket，用轮询；防御要响应及时，
     故轮询比纯farming更快（默认 20s）。
     """
-    poll_interval_sec: int = 20          # 轮询间隔（防御需较快捕捉墙变化；240/min 限速下安全）
+    poll_interval_sec: int = 8           # 轮询间隔（防御+清仓节奏；被吃后最多滞后此秒数卖出）
     token_cooldown_sec: int = 180        # 同一 token 两次撤/挂动作最小间隔
     max_cancels_per_hour: int = 60       # 全局滚动 1h 撤单预算上限（反作弊护栏）
     recenter_deadband_ticks: float = 1.0 # 出带滞回：超出奖励价带 >此 tick 数才重心（防抖）
     refill_on_fill: bool = True          # 一侧完全成交后补回该侧（维持双边=最大奖励）
     min_two_sided: bool = True           # 缺一侧即视为需补单（双边才拿满奖励）
     enable_defense: bool = True          # 是否启用订单簿变化防御（关=仅告警不撤）
+    # 清仓（被吃后平单边仓）——卖价走簿吃深度，确保能被承接
+    close_min_position: float = 5.0      # 最小清仓持仓（份）
+    close_offset: float = 0.01           # 基础让价（卖价在承接档基础上再降，确保成交）
+    close_max_drop: float = 0.10         # 最大让价：簿在此范围内吃不下→尽力卖并告警（防卖到地板）
 
 
 @dataclass
@@ -204,11 +211,15 @@ class PredictFunDefenseConfig:
     （前墙/同档 USDT）按 predict.fun 真实薄簿大幅下调——实测 top40：前墙中位411/p25 52、
     同档中位286/p25 104。薄簿噪声大，单轮/同档跌幅阈值取偏大值以免误撤（撤多了触发反作弊）。
     """
+    # 只盯"变化"，不盯"静态薄度"：predict.fun 簿本来就薄 + 极端价天然偏斜，静态门槛会一上来全触发。
+    use_absolute_floors: bool = False     # 静态"前墙/同档太薄"绝对兜底（predict.fun 默认关）
+    use_imbalance: bool = False           # 买卖偏斜（极端价市场天然偏斜→默认关）
+    change_min_depth: float = 15.0        # 变化检测"曾有意义"门槛 USDT（替代 same_safe 作相对跌幅闸）
     extreme_threshold: float = 0.10       # 极端价（≤0.10 或 ≥0.90）用更敏感参数
     front_present: float = 50.0           # 前墙"存在"判定门槛 USDT（Polymarket 100）
-    front_absolute: float = 30.0          # 前墙绝对兜底 USDT（Polymarket 100）
+    front_absolute: float = 30.0          # 前墙绝对兜底 USDT（仅 use_absolute_floors 时）
     front_absolute_ref: float = 0.0       # 高水位>此值才启用绝对兜底（0=总启用）
-    same_safe: float = 80.0               # 同档安全深度 USDT（Polymarket 200）
+    same_safe: float = 80.0               # 同档安全深度 USDT（仅 use_absolute_floors 时）
     front_drop: float = 0.30              # 前墙单轮跌幅触发（薄簿噪声→取0.30）
     same_drop: float = 0.30               # 同档单轮跌幅触发
     front_hw_drop: float = 0.50           # 前墙高水位累计跌幅触发

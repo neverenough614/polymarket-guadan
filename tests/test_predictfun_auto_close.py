@@ -1,6 +1,7 @@
-"""predict.fun 自动清仓安全网：完整套→merge、单边残余→卖出、持仓解析。"""
+"""predict.fun 自动清仓安全网：完整套→merge、单边残余→走簿承接卖出、持仓解析。"""
 from predictfun_data.auto_close import (
-    decide_close_actions, positions_to_map, CloseAction, MERGE, SELL,
+    decide_close_actions, positions_to_map, absorbing_sell_price,
+    CloseAction, MERGE, SELL,
 )
 from predictfun_data import units
 
@@ -17,8 +18,25 @@ def _meta_of(table):
     return lambda tid: table.get(tid)
 
 
-def _bid_of(table):
-    return lambda tid: table.get(tid)
+def _bids_of(table):
+    """table: tid→[(price,size)] 降序买档列表。"""
+    return lambda tid: table.get(tid, [])
+
+
+# ---------- absorbing_sell_price：走簿求承接卖价 ----------
+def test_absorbing_walks_book_until_size_absorbed():
+    bids = [(0.50, 50), (0.48, 30), (0.45, 200)]   # 累计到 0.45 档 =280 ≥100
+    price, ok = absorbing_sell_price(bids, size=100, base_offset=0.01, max_drop=0.10, tick=0.01)
+    assert ok and abs(price - 0.44) < 1e-9         # 0.45 − base_offset 0.01
+
+def test_absorbing_insufficient_within_max_drop():
+    bids = [(0.50, 10), (0.49, 10)]                 # max_drop0.10→地板0.40，累计仅20<100
+    price, ok = absorbing_sell_price(bids, size=100, base_offset=0.01, max_drop=0.10, tick=0.01)
+    assert not ok and abs(price - 0.40) < 1e-9      # 尽力卖在地板价
+
+def test_absorbing_empty_book():
+    price, ok = absorbing_sell_price([], size=100, base_offset=0.01, max_drop=0.10, tick=0.01)
+    assert price is None and not ok
 
 
 # ---------- decide_close_actions ----------
@@ -26,7 +44,8 @@ def test_complete_set_merges_min_amount():
     # YES 持 300、NO 持 200 → merge 200（取 min），各剩 100 残余
     metas = {"YES": _Meta("c1", "NO"), "NO": _Meta("c1", "YES")}
     actions = decide_close_actions(
-        {"YES": 300, "NO": 200}, _meta_of(metas), _bid_of({"YES": 0.30, "NO": 0.69}),
+        {"YES": 300, "NO": 200}, _meta_of(metas),
+        _bids_of({"YES": [(0.30, 500)], "NO": [(0.69, 500)]}),
         min_close=5, sell_offset=0.02, tick=0.01,
     )
     merges = [a for a in actions if a.kind == MERGE]
@@ -39,37 +58,47 @@ def test_complete_set_merges_min_amount():
 def test_merge_only_once_per_condition():
     metas = {"YES": _Meta("c1", "NO"), "NO": _Meta("c1", "YES")}
     actions = decide_close_actions(
-        {"YES": 200, "NO": 200}, _meta_of(metas), _bid_of({"YES": 0.3, "NO": 0.7}),
+        {"YES": 200, "NO": 200}, _meta_of(metas),
+        _bids_of({"YES": [(0.3, 500)], "NO": [(0.7, 500)]}),
         min_close=5, sell_offset=0.02,
     )
     assert len([a for a in actions if a.kind == MERGE]) == 1   # 不重复 merge 同一 condition
     assert [a for a in actions if a.kind == SELL] == []        # 等量→无残余
 
 
-def test_single_sided_sells_at_bid_minus_offset():
+def test_single_sided_sells_at_absorbing_price():
     metas = {"YES": _Meta("c1", "NO")}     # 只持 YES，无 NO 持仓
     actions = decide_close_actions(
-        {"YES": 150}, _meta_of(metas), _bid_of({"YES": 0.30}),
+        {"YES": 150}, _meta_of(metas), _bids_of({"YES": [(0.30, 500)]}),
         min_close=5, sell_offset=0.02, tick=0.01,
     )
     assert len(actions) == 1
     a = actions[0]
-    assert a.kind == SELL and a.size == 150 and a.price == 0.28   # 0.30-0.02
+    assert a.kind == SELL and a.size == 150 and a.price == 0.28 and a.depth_sufficient   # 0.30-0.02
 
 
 def test_sell_price_floored_at_tick():
     metas = {"YES": _Meta("c1", "NO")}
     actions = decide_close_actions(
-        {"YES": 100}, _meta_of(metas), _bid_of({"YES": 0.01}),
+        {"YES": 100}, _meta_of(metas), _bids_of({"YES": [(0.01, 500)]}),
         min_close=5, sell_offset=0.02, tick=0.01,
     )
     assert actions[0].price == 0.01     # max(tick, 0.01-0.02)=tick
 
 
+def test_sell_flags_insufficient_depth():
+    metas = {"YES": _Meta("c1", "NO")}
+    actions = decide_close_actions(   # 簿仅 20 份，吃不下 150
+        {"YES": 150}, _meta_of(metas), _bids_of({"YES": [(0.30, 10), (0.29, 10)]}),
+        min_close=5, sell_offset=0.02, max_drop=0.10, tick=0.01,
+    )
+    assert actions[0].kind == SELL and actions[0].depth_sufficient is False
+
+
 def test_below_min_close_ignored():
     metas = {"YES": _Meta("c1", "NO")}
     actions = decide_close_actions(
-        {"YES": 3}, _meta_of(metas), _bid_of({"YES": 0.30}), min_close=5, sell_offset=0.02,
+        {"YES": 3}, _meta_of(metas), _bids_of({"YES": [(0.30, 500)]}), min_close=5, sell_offset=0.02,
     )
     assert actions == []
 
@@ -77,9 +106,9 @@ def test_below_min_close_ignored():
 def test_single_sided_no_bid_skips():
     metas = {"YES": _Meta("c1", "NO")}
     actions = decide_close_actions(
-        {"YES": 150}, _meta_of(metas), _bid_of({}), min_close=5, sell_offset=0.02,
+        {"YES": 150}, _meta_of(metas), _bids_of({}), min_close=5, sell_offset=0.02,
     )
-    assert actions == []     # 无 best_bid 不冒进卖出
+    assert actions == []     # 无买档不冒进卖出
 
 
 # ---------- positions_to_map ----------

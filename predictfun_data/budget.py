@@ -31,22 +31,34 @@ def available_after_open_buys(total_balance: float, open_orders: List[Dict[str, 
     return max(0.0, float(total_balance) - locked)
 
 
-def pair_market_legs(quotes: List[Quote], min_size: float) -> Tuple[List[Leg], str]:
-    """一个市场的 outcome 报价 → 完整套双腿。both-or-skip + 两腿同量(=min_size) + 自成交护栏。
+def pair_market_legs(quotes: List[Quote], min_size: float, allow_single_sided=None) -> Tuple[List[Leg], str]:
+    """一个市场的 outcome 报价 → 完整套双腿或单腿。两腿同量(=min_size) + 自成交护栏。
 
     quotes 需恰为该市场两个 outcome 的 (token, price, size, reason)。
-    返回 (legs, reason)：legs 为 [] 或长度 2 的 [(token, price, min_size)]。
+    - 两腿都可报价 → 完整套(both)，需 p_yes+p_no<1（否则一套≥$1 必亏）。
+    - 仅一腿可报价 → 单向(若 allow_single_sided)。能报价已隐含"非极端+出场深度足"
+      （compute_quote 已用价带+exit 门控），故单向风险可控。
+    - 都不能 → 跳过。
+    返回 (legs, reason)：legs 为 []/长度1/长度2 的 [(token, price, min_size)]。
     """
+    if allow_single_sided is None:
+        from config.bot_config import cfg
+        allow_single_sided = cfg.predictfun_place.allow_single_sided
     if len(quotes) != 2:
         return [], f"not_binary_{len(quotes)}"
-    for _t, price, _s, reason in quotes:
-        if price is None:
-            return [], f"one_sided:{reason}"
-    # 自成交/亏损护栏：买 YES + 买 NO 的价之和必须 < 1，否则一套成本 ≥ $1 = 必亏（违反完整套套利前提）
-    p_sum = sum(float(price) for _t, price, _s, _r in quotes)
-    if p_sum >= 1.0:
-        return [], f"crossed_pair_{p_sum:.3f}"
-    return [(t, float(price), float(min_size)) for t, price, _s, _r in quotes], "ok"
+    quoted = [(t, float(price)) for t, price, _s, _r in quotes if price is not None]
+    skip_reason = next((r for _t, p, _s, r in quotes if p is None), "")
+    if len(quoted) == 2:
+        p_sum = quoted[0][1] + quoted[1][1]
+        if p_sum >= 1.0:                          # 自成交/亏损护栏
+            return [], f"crossed_pair_{p_sum:.3f}"
+        return [(t, p, float(min_size)) for t, p in quoted], "ok"
+    if len(quoted) == 1:
+        if not allow_single_sided:
+            return [], f"one_sided:{skip_reason}"
+        t, p = quoted[0]
+        return [(t, p, float(min_size))], "single_sided"
+    return [], f"both_unquotable:{skip_reason}"
 
 
 def market_cost(legs: List[Leg]) -> float:

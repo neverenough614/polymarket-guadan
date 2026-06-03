@@ -22,10 +22,16 @@ def test_pair_both_legs_quotable_uses_min_size():
     assert [p for _t, p, _s in legs] == [0.10, 0.89]
 
 
-def test_pair_skips_when_one_leg_unquotable():
-    quotes = [(_tok("YES"), 0.10, 100.0, "ok"), (_tok("NO"), None, None, "thin_top5_50")]
-    legs, reason = pair_market_legs(quotes, min_size=100.0)
-    assert legs == [] and reason.startswith("one_sided:")   # 单边裸方向→整市场跳过
+def test_pair_single_sided_when_allowed():
+    quotes = [(_tok("YES"), 0.40, 100.0, "ok"), (_tok("NO"), None, None, "thin_top5_50")]
+    legs, reason = pair_market_legs(quotes, min_size=100.0, allow_single_sided=True)
+    assert len(legs) == 1 and legs[0][0]["token_type"] == "YES" and reason == "single_sided"
+
+
+def test_pair_skips_single_sided_when_disallowed():
+    quotes = [(_tok("YES"), 0.40, 100.0, "ok"), (_tok("NO"), None, None, "thin_top5_50")]
+    legs, reason = pair_market_legs(quotes, min_size=100.0, allow_single_sided=False)
+    assert legs == [] and reason.startswith("one_sided:")
 
 
 def test_pair_skips_when_not_binary():
@@ -120,10 +126,10 @@ def test_build_plan_pairs_then_budgets():
         id(markets[2][1][1]): (markets[2][1][1], 0.89, 100.0, "ok"),
     }
     quote_fn = lambda t: quotes[id(t)]
-    # 余额仅够 1 个市场（≈99；110×0.95=104.5≥99，但放不下第二个）→ m1 入选，m2 单边跳，m3 预算不够
+    # 单向默认开：m1 双腿(99)+m2 单向(10)=109≤120×0.95=114 → 都入选；m3(99) 预算不够
     selected, skip_reasons, total, dropped = build_plan(
-        markets, quote_fn, lambda toks: 100.0, available=110.0, safety=0.95,
+        markets, quote_fn, lambda toks: 100.0, available=120.0, safety=0.95,
     )
-    assert len(selected) == 1
-    assert skip_reasons.get("budget_exhausted") == 1
-    assert any(k.startswith("one_sided") for k in skip_reasons)
+    assert len(selected) == 2                       # m1 完整套 + m2 单向
+    assert len(selected[0][1]) == 2 and len(selected[1][1]) == 1
+    assert skip_reasons.get("budget_exhausted") == 1   # m3
