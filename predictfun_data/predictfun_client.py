@@ -114,7 +114,7 @@ class PredictFunClient:
 
     # ---- 下单 ----
     def create_order(self, token_id, side, price, size, neg_risk=False,
-                     is_yield_bearing=None, order_type="LIMIT") -> Dict[str, Any]:
+                     is_yield_bearing=None, order_type="LIMIT", fee_rate_bps=0) -> Dict[str, Any]:
         yb = self._yield_default if is_yield_bearing is None else is_yield_bearing
         try:
             sdk_side, LimitHelperInput, BuildOrderInput = self._sdk_order_types(side)
@@ -129,12 +129,13 @@ class PredictFunClient:
                 token_id=str(token_id),
                 maker_amount=str(amounts.maker_amount),
                 taker_amount=str(amounts.taker_amount),
-                fee_rate_bps=0,  # VERIFY: 优先用市场 feeRateBps
+                fee_rate_bps=int(fee_rate_bps),  # 必须用市场要求的 feeRateBps（签进订单），否则被拒
             ))
             typed = self._builder.build_typed_data(order, is_neg_risk=neg_risk, is_yield_bearing=yb)
             signed = self._builder.sign_typed_data_order(typed)
+            order_hash = self._builder.build_typed_data_hash(typed)  # SignedOrder.hash 为 None，需单独算
             strategy = "LIMIT" if str(order_type).upper() == "LIMIT" else "MARKET"
-            body = self._order_body(signed, pps_wei, strategy)
+            body = self._order_body(signed, order_hash, pps_wei, strategy)
             resp = self.rest.create_order(body)
             data = resp.get("data", resp)
             return {"status": "live", "order_id": str(data.get("id") or data.get("hash") or ""),
@@ -162,14 +163,24 @@ class PredictFunClient:
             sdk_side = "BUY" if side_str == "BUY" else "SELL"
             return sdk_side, _NS, _NS
 
-    def _order_body(self, signed, price_per_share_wei, strategy) -> Dict[str, Any]:
-        # 真实结构（predict.fun 文档）：{data:{order:{...signedOrder, hash}, pricePerShare, strategy}}
-        # VERIFY: pricePerShare 单位(wei?)、order id 响应字段、确切 POST 路径——首次实盘只读/小单时核对
-        order_obj = signed.to_dict() if hasattr(signed, "to_dict") else dict(getattr(signed, "__dict__", {}))
-        if hasattr(signed, "signature") and "signature" not in order_obj:
-            order_obj["signature"] = signed.signature
-        if hasattr(signed, "hash") and "hash" not in order_obj:
-            order_obj["hash"] = signed.hash
+    def _order_body(self, signed, order_hash, price_per_share_wei, strategy) -> Dict[str, Any]:
+        # ContractOrder 字段名对齐 EIP-712 ORDER_STRUCTURE（camelCase）；uint256 用字符串，side/signatureType 用整数
+        order_obj = {
+            "salt": str(signed.salt),
+            "maker": signed.maker,
+            "signer": signed.signer,
+            "taker": signed.taker,
+            "tokenId": str(signed.token_id),
+            "makerAmount": str(signed.maker_amount),
+            "takerAmount": str(signed.taker_amount),
+            "expiration": str(signed.expiration),
+            "nonce": str(signed.nonce),
+            "feeRateBps": str(signed.fee_rate_bps),
+            "side": int(signed.side),
+            "signatureType": int(signed.signature_type),
+            "signature": signed.signature,
+            "hash": order_hash,
+        }
         return {"data": {"order": order_obj, "pricePerShare": str(price_per_share_wei), "strategy": strategy}}
 
     # ---- 查询（归一化）----

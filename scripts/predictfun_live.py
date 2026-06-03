@@ -64,15 +64,17 @@ def _stage_order(c):
     outcomes = m.get("outcomes") or []
     first = outcomes[0] if outcomes else {}
     token_id = first.get("onChainId") or first.get("tokenId")  # predict.fun 用 onChainId
-    print(f"[A] 目标市场 id={market_id} token_id={token_id} "
+    fee = int(m.get("feeRateBps") or 0)  # fee rate 须用市场要求值（签进订单）
+    print(f"[A] 目标市场 id={market_id} token_id={token_id} feeRateBps={fee} "
           f"best_bid={book.bids[0].price if book.bids else None}")
     if not token_id:
         print("✗ 未拿到 token_id（看阶段1 outcomes 字段名，对照调整）"); return 1
-    # 极小买单，价格远离 mid（0.02）以免立即成交
-    print("[B] 准备下单：BUY 0.02 x 5（极小、远离盘口）")
-    place = c.create_order(token_id, "BUY", 0.02, 5,
+    # 极小买单，价格远离盘口（0.02 « best_ask 0.49）以免成交；size=50 使价值=1.0 USD 过 0.9 下限
+    print("[B] 准备下单：BUY 0.02 x 50（价值 1.0 USD，远离盘口、不会成交）")
+    place = c.create_order(token_id, "BUY", 0.02, 50,
                            neg_risk=bool(m.get("isNegRisk")),
-                           is_yield_bearing=bool(m.get("isYieldBearing")))
+                           is_yield_bearing=bool(m.get("isYieldBearing")),
+                           fee_rate_bps=fee)
     print(f"[C] 下单返回：{json.dumps(place, ensure_ascii=False)[:500]}")
     if place.get("status") != "live":
         print("✗ 下单失败（看上面 error，多半是 # VERIFY 字段，贴回修）"); return 1

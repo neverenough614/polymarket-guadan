@@ -30,9 +30,19 @@ class FakeAmounts:
 
 
 class FakeSignedOrder:
+    salt = "111"
+    maker = "0xMAKER"
+    signer = "0xSIGNER"
+    taker = "0x0000000000000000000000000000000000000000"
+    token_id = "tok"
+    maker_amount = "52000000"
+    taker_amount = "100000000"
+    expiration = "4102444800"
+    nonce = "0"
+    fee_rate_bps = "0"
+    side = 0
+    signature_type = 0
     signature = "0xSIG"
-    def to_dict(self):
-        return {"maker": "0xabc", "makerAmount": "52000000", "takerAmount": "100000000"}
 
 
 class FakeBuilder:
@@ -46,6 +56,8 @@ class FakeBuilder:
         return {"typed": "data", "is_neg_risk": is_neg_risk, "is_yield_bearing": is_yield_bearing}
     def sign_typed_data_order(self, _typed):
         return FakeSignedOrder()
+    def build_typed_data_hash(self, _typed):
+        return "0xHASH"
     def balance_of(self, _sym, address=None):
         return 123_500000000000000000  # 原始 wei(18位)，from_wei 后 = 123.5
 
@@ -86,7 +98,13 @@ def test_create_order_builds_signed_body_and_normalizes():
     assert out["order_id"] == "ord1"
     body = c.rest.created[0]
     assert body["data"]["strategy"] == "LIMIT"
-    assert body["data"]["order"]["signature"] == "0xSIG"
+    order = body["data"]["order"]
+    assert order["signature"] == "0xSIG"
+    assert order["hash"] == "0xHASH"          # SignedOrder.hash 为 None，须用 build_typed_data_hash
+    assert order["tokenId"] == "tok"          # camelCase（对齐 EIP-712 ORDER_STRUCTURE）
+    assert order["makerAmount"] == "52000000"
+    assert order["side"] == 0
+    assert "pricePerShare" in body["data"]
     assert "pricePerShare" in body["data"]
 
 
