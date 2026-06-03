@@ -69,7 +69,7 @@ class FakeRest:
         self._orders = []
     def create_order(self, body):
         self.created.append(body)
-        return {"success": True, "data": {"id": "ord1", "hash": "0xh"}}
+        return {"success": True, "data": {"code": "OK", "orderId": "ord1", "orderHash": "0xh"}}
     def remove_orders(self, ids):
         self.removed.append(list(ids))
         return {"success": True, "removed": list(ids), "noop": []}

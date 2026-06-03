@@ -138,8 +138,9 @@ class PredictFunClient:
             body = self._order_body(signed, order_hash, pps_wei, strategy)
             resp = self.rest.create_order(body)
             data = resp.get("data", resp)
-            return {"status": "live", "order_id": str(data.get("id") or data.get("hash") or ""),
-                    "hash": data.get("hash"), "raw": resp}
+            return {"status": "live",
+                    "order_id": str(data.get("id") or data.get("orderId") or data.get("orderHash") or ""),
+                    "hash": data.get("hash") or data.get("orderHash"), "raw": resp}
         except Exception as e:  # 对齐 PolymarketClient：失败不抛裸异常
             return {"status": "error", "error": str(e)}
 
