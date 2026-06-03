@@ -153,6 +153,32 @@ class PredictFunSelectionConfig:
 
 
 @dataclass
+class PredictFunPlaceConfig:
+    """predict.fun 挂单/报价配置（仿 Polymarket place_order_for_token，按真实薄簿校准）。
+
+    校准依据：top40 按日奖励抽样的实时 YES 簿统计——
+      档1深度 中位 411 / p25 52；前5档 中位 1857 / p25 805；spread 中位 0.016；bid档数 中位 10。
+    Polymarket 的档深>1500/前5>5000 会杀掉 85%/62% 的市场，且 predict.fun **奖励最高的市场恰最薄**
+    （PP 奖励=固定 hourlyRate 按带内瓜分，与簿深无关→薄=少竞争=每刀积分更高）。
+    故深度门槛大幅下调，薄市场靠"出场流动性"而非"深度墙"控风险（用户取向：薄也挂+缩量+要求能出场）。
+
+    与 Polymarket 的差异（均有据）：
+      - 砍掉"占自己≤20%档深""孤立墙比≤3.5""档距连续性"——薄簿误杀，带内成员资格才是真约束。
+      - 不移植"奖励效率闸≥0.2"——predict.fun reward_per_100 高达 300+（PP），恒过=空操作。
+      - 动态量在薄市场落到 floor=min_size(=shareThreshold)，即"缩量"，而非 Polymarket 的"<min 就跳过"。
+    """
+    min_level_depth: float = 15.0        # 单档灰尘过滤（USDT）：低于此视为无效档，跳到下一档
+    min_top5_depth: float = 150.0        # 前5档累计 sanity 下限（USDT）：低于此整个市场跳过
+    size_ratio: float = 0.30             # 动态量=前3档买侧深度×此比/mid（对齐 Normal LP）
+    max_order_size: float = 500.0        # 挂单量上限（份）；下限=token 的 min_size(≥100)
+    require_exit_liquidity: bool = True   # 薄簿风控核心：买入成交后须能卖回更低 bid 平仓
+    exit_max_gap: float = 0.05           # 出场：最近更低 bid 距我买价的最大间距
+    exit_depth_multiplier: float = 1.0   # 出场：更低档累计深度须 ≥ 我 notional × 此值
+    min_q_score_ratio: float = 0.04      # Q-score 下限 ((v-s)/v)^2（监控判无效单用）
+    extreme_price_threshold: float = 0.10  # 极端价（≤0.10 或 ≥0.90）→ 要求该市场双侧都可报价
+
+
+@dataclass
 class PredictFunMonitorConfig:
     """predict.fun 监控/防御配置（SP5）—— 基调：稳挂少动，避开反作弊清零。
 
@@ -179,6 +205,7 @@ class BotConfig:
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
     predictfun_discovery: PredictFunDiscoveryConfig = field(default_factory=PredictFunDiscoveryConfig)
     predictfun_selection: PredictFunSelectionConfig = field(default_factory=PredictFunSelectionConfig)
+    predictfun_place: PredictFunPlaceConfig = field(default_factory=PredictFunPlaceConfig)
     predictfun_monitor: PredictFunMonitorConfig = field(default_factory=PredictFunMonitorConfig)
 
 

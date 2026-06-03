@@ -83,7 +83,7 @@ def test_evaluate_recenter_cancels_and_places_when_allowed(monkeypatch):
     be = FakeBackend(); g = ChurnGuard(token_cooldown_sec=300, max_cancels_per_hour=999)
     calls = {}
     monkeypatch.setattr(mloop, "place_bid",
-                        lambda backend, ti, bb, ba, tick_size=None: calls.update(placed=True) or {"status": "placed"})
+                        lambda backend, ti, book, tick_size=None: calls.update(placed=True) or {"status": "placed"})
     res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.40, churn=g, now=1.0)
     assert res["action"] == RECENTER
     assert be.cancelled == ["T"]                 # 先撤
@@ -118,7 +118,7 @@ def test_evaluate_refill_places_without_cancel(monkeypatch):
     be = FakeBackend(); g = ChurnGuard(0, max_cancels_per_hour=1)
     calls = {}
     monkeypatch.setattr(mloop, "place_bid",
-                        lambda backend, ti, bb, ba, tick_size=None: calls.update(placed=True) or {"status": "placed"})
+                        lambda backend, ti, book, tick_size=None: calls.update(placed=True) or {"status": "placed"})
     res = mloop.evaluate_and_execute(be, TOKEN, my_bid=None, churn=g, now=1.0)
     assert res["action"] == REFILL
     assert be.cancelled == []               # 不撤

@@ -1,0 +1,184 @@
+"""predict.fun 自动清仓安全网（仿 Polymarket auto_close_positions_task，按 predict.fun 适配）。
+
+买 YES + 买 NO 双边做市，成交后会产生持仓：
+  - 双腿都成交 → 持有等量 YES+NO = 完整套 → **merge 回 USDT**（无滑点，最优；
+    SDK 要求两 outcome 等量，故 amount=min(held_yes, held_no)，单位 wei）。
+  - 仅单腿成交 → 持有单边 outcome → **以 best_bid−offset 限价卖出**平仓
+    （注意：此时已持有份额，卖出非裸卖、合法；裸卖才被 predict.fun 拒）。
+
+decide_close_actions 为纯函数（按 condition_id 归集双边、决定 merge/sell），便于单测；
+run_auto_close 负责 IO（拉持仓/撤买单/执行 merge 与 sell）。
+
+⚠️ 持仓字段名/单位以首次真实成交校验为准：本模块对常见字段与 wei/份额做防御解析。
+"""
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
+
+from config.bot_config import cfg
+from . import units
+
+MERGE = "MERGE"
+SELL = "SELL"
+
+
+@dataclass(frozen=True)
+class CloseAction:
+    kind: str                       # MERGE | SELL
+    # MERGE
+    condition_id: Optional[str] = None
+    amount_shares: float = 0.0      # 每个 outcome 合并的份额（执行时转 wei）
+    neg_risk: bool = False
+    yield_bearing: bool = False
+    # SELL
+    token_id: Optional[str] = None
+    price: float = 0.0
+    size: float = 0.0
+    # 通用
+    reason: str = ""
+
+
+def decide_close_actions(
+    positions: Dict[str, float],
+    meta_of: Callable[[str], Any],
+    best_bid_of: Callable[[str], Optional[float]],
+    *,
+    min_close: float,
+    sell_offset: float,
+    tick: float = 0.01,
+) -> List[CloseAction]:
+    """positions: token_id→持仓份额。返回清仓动作列表（先 merge 完整套，再卖残余单边）。
+
+    按 condition_id 归集二元市场两腿；每个市场只处理一次。merge 量=min(两腿)，
+    残余单边以 best_bid−offset 卖出。无 meta / 无 best_bid 的单边持仓跳过（不冒进）。
+    """
+    actions: List[CloseAction] = []
+    consumed: Dict[str, float] = {}     # token_id → 已被 merge 消耗的份额
+    done_conditions: set = set()
+
+    # Pass 1：按 condition 归集双边，决定 merge（两腿各消耗 set_amount）
+    for token_id, raw_size in positions.items():
+        size = float(raw_size or 0)
+        if size < min_close:
+            continue
+        meta = meta_of(token_id)
+        cond = getattr(meta, "condition_id", None) if meta else None
+        comp = getattr(meta, "complement_token_id", None) if meta else None
+        if not cond or cond in done_conditions:
+            continue
+        comp_size = float(positions.get(comp, 0) or 0) if comp else 0.0
+        set_amount = min(size, comp_size)
+        if set_amount >= min_close:
+            actions.append(CloseAction(
+                kind=MERGE, condition_id=cond, amount_shares=set_amount,
+                neg_risk=bool(getattr(meta, "neg_risk", False)),
+                yield_bearing=bool(getattr(meta, "yield_bearing", False)),
+                reason=f"complete_set×{set_amount:.0f}→merge",
+            ))
+            done_conditions.add(cond)
+            consumed[token_id] = consumed.get(token_id, 0.0) + set_amount
+            if comp:
+                consumed[comp] = consumed.get(comp, 0.0) + set_amount
+
+    # Pass 2：残余单边（持仓 − 已 merge 消耗）以 best_bid−offset 卖出
+    for token_id, raw_size in positions.items():
+        residual = float(raw_size or 0) - consumed.get(token_id, 0.0)
+        if residual < min_close:
+            continue
+        meta = meta_of(token_id)
+        bb = best_bid_of(token_id)
+        if not bb or bb <= 0:
+            continue                     # 无 best_bid 不冒进卖出
+        price = units.price_to_tick(max(tick, bb - sell_offset), tick)
+        actions.append(CloseAction(
+            kind=SELL, token_id=token_id, price=price, size=residual,
+            neg_risk=bool(getattr(meta, "neg_risk", False)) if meta else False,
+            reason=f"residual×{residual:.0f}@bid{bb:.3f}-{sell_offset}",
+        ))
+    return actions
+
+
+# ---------- 持仓解析（防御：字段名/单位以首次真实成交为准）----------
+def _pos_token_id(p: Dict[str, Any]) -> str:
+    return str(p.get("token_id") or p.get("asset") or p.get("asset_id")
+              or p.get("tokenId") or p.get("outcomeId") or p.get("onChainId") or "")
+
+
+def _pos_size(p: Dict[str, Any]) -> float:
+    raw = (p.get("size") if p.get("size") is not None else
+           p.get("quantity") if p.get("quantity") is not None else
+           p.get("amount") if p.get("amount") is not None else
+           p.get("balance"))
+    if raw is None:
+        return 0.0
+    try:
+        # 单位防御：份额量级 1–1e7，wei 量级 ≥1e16；统一以 1e10 为界（两边都不会误判）
+        s = str(raw).strip()
+        if s.lstrip("-").isdigit():
+            iv = int(s)
+            return units.from_wei(iv) if iv >= 10 ** 10 else float(iv)
+        val = float(s)
+        return units.from_wei(int(val)) if val >= 1e10 else val
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def positions_to_map(rows: List[Dict[str, Any]], min_close: float = 0.0) -> Dict[str, float]:
+    """原始持仓行 → {token_id: 份额}（过滤 < min_close 与空 id）。"""
+    out: Dict[str, float] = {}
+    for p in rows or []:
+        tid = _pos_token_id(p)
+        if not tid:
+            continue
+        size = _pos_size(p)
+        if size >= min_close and size > 0:
+            out[tid] = out.get(tid, 0.0) + size
+    return out
+
+
+def run_auto_close(backend: Any, cc=None) -> Dict[str, Any]:
+    """拉持仓→决定动作→撤相关买单→执行 merge/sell。返回执行摘要。"""
+    cc = cc or cfg.close
+    client = backend.raw_client
+    rows = backend.get_all_positions()
+    # get_all_positions 可能返回 DataFrame 或 list[dict]
+    if hasattr(rows, "to_dict"):
+        rows = rows.to_dict("records")
+    positions = positions_to_map(rows, min_close=0.0)
+    if not positions:
+        return {"merged": 0, "sold": 0, "actions": []}
+
+    def best_bid_of(tid: str) -> Optional[float]:
+        try:
+            book = backend.get_order_book(tid)
+            bids = [float(b.price) for b in (book.bids or [])] if book else []
+            return max(bids) if bids else None
+        except Exception:
+            return None
+
+    actions = decide_close_actions(
+        positions, backend.meta_for, best_bid_of,
+        min_close=cc.MIN_POSITION_TO_CLOSE, sell_offset=cc.CLOSE_PRICE_OFFSET,
+    )
+    merged = sold = 0
+    for a in actions:
+        try:
+            if a.kind == MERGE:
+                client.merge_positions(
+                    a.condition_id, units.shares_to_wei(a.amount_shares),
+                    is_neg_risk=a.neg_risk, is_yield_bearing=a.yield_bearing,
+                )
+                merged += 1
+                print(f"   🧬 [merge] cond={str(a.condition_id)[:12]} ×{a.amount_shares:.0f} → USDT")
+            elif a.kind == SELL:
+                backend.cancel_all_asset(a.token_id)   # 撤掉该 token 买单，防边清边买
+                # 同时撤对手腿买单：否则卖掉残余后对手买单成交→重新累积单边持仓
+                meta = backend.meta_for(a.token_id)
+                comp = getattr(meta, "complement_token_id", None) if meta else None
+                if comp:
+                    backend.cancel_all_asset(comp)
+                backend.create_order(a.token_id, "SELL", a.price, a.size, neg_risk=a.neg_risk)
+                sold += 1
+                print(f"   💰 [sell] {str(a.token_id)[:12]} ×{a.size:.0f}@{a.price:.3f}")
+        except Exception as e:
+            print(f"   ⚠️ [auto_close] {a.kind} 失败: {str(e)[:80]}")
+    return {"merged": merged, "sold": sold, "actions": actions}

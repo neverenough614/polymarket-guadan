@@ -17,6 +17,7 @@ from orderbook.analyzer import get_orderbook_info
 from predictfun_data.monitor import decide_action, NONE
 from predictfun_data.churn_guard import ChurnGuard
 from predictfun_data.placer import place_bid
+from predictfun_data.auto_close import run_auto_close
 
 
 def evaluate_and_execute(
@@ -32,7 +33,7 @@ def evaluate_and_execute(
     token_id = token_info["token_id"]
     max_spread = token_info.get("max_spread")
 
-    _book, best_bid, best_ask, mid = get_orderbook_info(backend, token_id)
+    book, best_bid, best_ask, mid = get_orderbook_info(backend, token_id)
     decision = decide_action(
         my_bid, mid, max_spread,
         deadband_ticks=mcfg.recenter_deadband_ticks,
@@ -54,7 +55,7 @@ def evaluate_and_execute(
         churn.record(token_id, now, count_as_cancel=True)
 
     try:
-        placed = place_bid(backend, token_info, best_bid, best_ask)
+        placed = place_bid(backend, token_info, book)
     except Exception as e:
         # 补单失败不致命：撤单已记账、冷却已武装；下轮无单走 REFILL(不撤)，不会撤单循环。
         placed = {"status": "error", "error": str(e)}
@@ -87,6 +88,14 @@ async def monitor_loop(
 
     while not (stop_event and stop_event.is_set()):
         try:
+            # 安全网先行：清掉被吃出来的持仓（完整套 merge / 单边卖出），再维护挂单
+            try:
+                cr = await asyncio.to_thread(run_auto_close, backend)
+                if cr.get("merged") or cr.get("sold"):
+                    print(f"   🧯 [auto_close] merge {cr['merged']} / sell {cr['sold']}")
+            except Exception as e:
+                print(f"⚠️ [auto_close] 本轮跳过：{e}")
+
             grouped = backend.get_all_my_orders_grouped()
             acted = 0
             for tid, token_info in by_id.items():

@@ -30,8 +30,11 @@ from execution.factory import create_execution_backend
 from execution.predictfun_monitor_loop import monitor_loop
 from predictfun_data.strategy_loader import load_predictfun_markets
 from predictfun_data.churn_guard import ChurnGuard
-from predictfun_data.placer import compute_bid, place_bid
+from predictfun_data.placer import compute_quote, place_leg
+from predictfun_data.budget import build_plan, available_after_open_buys
 from orderbook.analyzer import get_orderbook_info
+
+SAFETY = 0.95   # 预算缓冲：累计预扣 ≤ 余额×此值（防边界 + 留 gas/滑点余量）
 
 
 def _parse_args(argv):
@@ -45,27 +48,53 @@ def _parse_args(argv):
     return mode, limit
 
 
-def _limit_markets(backend, tokens, n_markets):
-    """按市场分组(YES+NO 两个 token 同属一市场),取前 n_markets 个市场的全部 token。
+def _group_markets(backend, tokens):
+    """按市场分组(YES+NO 同属一市场),按该市场日奖励降序排列。
 
-    predict.fun 双边=买 YES + 买 NO(买 NO 即卖 YES),故每市场两个 outcome 都要挂买单。
-    n_markets<=0 表示不限。返回展平后的 token 列表(每市场两张买单)。
+    返回 [(market_key, [outcome_token,...])]，每市场恰两个 outcome（buy YES + buy NO）。
     """
-    by_market = {}      # market_id -> [tokens]，保持出现顺序
-    order = []
+    by_market = {}
     for t in tokens:
         meta = backend.meta_for(t["token_id"])
         mk = meta.market_id if meta is not None else ("u", t["token_id"])
-        if mk not in by_market:
-            by_market[mk] = []
-            order.append(mk)
-        by_market[mk].append(t)
+        by_market.setdefault(mk, []).append(t)
+
+    def reward_of(toks):
+        return max((float(t.get("rewards_daily_rate", 0) or 0) for t in toks), default=0.0)
+
+    return sorted(by_market.items(), key=lambda kv: reward_of(kv[1]), reverse=True)
+
+
+def _min_size(tokens):
+    if not tokens:
+        return 100.0
+    return max(100.0, *(float(t.get("min_size", 0) or 0) for t in tokens))
+
+
+def _quote_fn(backend):
+    """返回 quote_fn(token)->(token, price, size, reason)，内部拉簿 + compute_quote。"""
+    def fn(t):
+        book, _bb, _ba, _mid = get_orderbook_info(backend, t["token_id"])
+        meta = backend.meta_for(t["token_id"])
+        tick = getattr(meta, "tick_size", 0.01) if meta else 0.01
+        min_size = max(100.0, float(t.get("min_size", 0) or 0))
+        price, size, reason = compute_quote(book, t.get("max_spread"), tick, min_size)
+        return (t, price, size, reason)
+    return fn
+
+
+def _plan_markets(backend, tokens, n_markets):
+    """分组→排序→（按市场数上限截断）→报价配对→预算守门。返回 (selected, skip_reasons, total)。"""
+    markets = _group_markets(backend, tokens)
     if n_markets and n_markets > 0:
-        order = order[:n_markets]
-    out = []
-    for mk in order:
-        out.extend(by_market[mk])
-    return out, len(order)
+        markets = markets[:n_markets]
+    # 可用抵押=链上总额−已挂买单预扣（重启/重复下单也不会超额授信）
+    total_bal = backend.raw_client.get_usdt_balance()
+    available = available_after_open_buys(total_bal, backend.get_all_orders())
+    selected, skip_reasons, total, _dropped = build_plan(
+        markets, _quote_fn(backend), _min_size, available, safety=SAFETY,
+    )
+    return selected, skip_reasons, total, available
 
 
 def _setup():
@@ -81,52 +110,55 @@ def _setup():
     return backend, tokens
 
 
-def _plan(backend, tokens):
-    print(f"\n=== PLAN（只读,不下单）{len(tokens)} 个 token（每 token 一张买单,YES+NO 构成双边）===")
-    quotable = 0
-    est_capital = 0.0
-    for i, t in enumerate(tokens):
-        tid = t["token_id"]
-        _book, bb, ba, mid = get_orderbook_info(backend, tid)
-        ms = t.get("max_spread")
-        meta = backend.meta_for(tid)
-        tick = getattr(meta, "tick_size", 0.01) if meta else 0.01
-        size = max(100.0, float(t.get("min_size", 0) or 0))
-        buy = compute_bid(bb or 0, ba or 0, ms, tick) if (bb and ba) else None
-        if buy is not None:
-            quotable += 1
-            est_capital += buy * size
-            tag = f"买 {buy:.3f}  占用≈{buy*size:.1f} USDT"
-        else:
-            tag = "—（单侧簿/交叉,跳过）"
-        print(f"  [{i+1}/{len(tokens)}] {str(t['question'])[:34]} [{t['token_type']}] "
-              f"mid={mid if mid is None else round(mid,3)} band±{ms} → {tag}  size≈{size:.0f}")
-    print(f"=== PLAN 结束：{quotable}/{len(tokens)} 可报价，预计占用合计≈{est_capital:.1f} USDT。"
-          f"确认后用 live/once + --limit 实盘 ===")
+def _print_selection(selected, skip_reasons, total, available):
+    print(f"\n--- 选中 {len(selected)} 个完整套市场（按日奖励降序，预算守门 ≤ 余额×{SAFETY}）---")
+    for i, (_key, legs) in enumerate(selected):
+        q = str(legs[0][0].get("question", ""))[:34]
+        cost = sum(p * s for _t, p, s in legs)
+        legs_str = " + ".join(f"{t.get('token_type')} {p:.3f}×{s:.0f}" for t, p, s in legs)
+        print(f"  [{i+1}] {q} → 买 {legs_str}  预扣≈{cost:.1f} USDT")
+    print(f"--- 预扣合计≈{total:.1f} / 余额 {available:.1f} USDT（缓冲后上限 {available*SAFETY:.1f}）---")
+    if skip_reasons:
+        print("   跳过原因：" + ", ".join(f"{k}={v}" for k, v in sorted(skip_reasons.items(), key=lambda x: -x[1])))
 
 
-def _place_once(backend, tokens):
-    print(f"\n=== 初挂（实盘,{len(tokens)} 个 token,各一张买单）===")
-    ok = skip = 0
-    for i, t in enumerate(tokens):
-        _book, bb, ba, _mid = get_orderbook_info(backend, t["token_id"])
-        res = place_bid(backend, t, bb or 0, ba or 0)
-        if res.get("status") == "placed":
-            ok += 1
-            print(f"  [{i+1}/{len(tokens)}] ✅ {str(t['question'])[:32]} [{t['token_type']}] BUY@{res['price']:.3f}×{res['size']:.0f}")
-        else:
-            skip += 1
-            print(f"  [{i+1}/{len(tokens)}] ⚠️ {str(t['question'])[:32]} [{t['token_type']}] → {res.get('status')}")
-    print(f"=== 初挂完成：成功 {ok}，跳过/失败 {skip} ===")
-    return ok, skip
+def _plan(backend, tokens, limit):
+    selected, skip_reasons, total, available = _plan_markets(backend, tokens, limit)
+    print(f"\n=== PLAN（只读,不下单）候选 {len(tokens)//2} 市场 ===")
+    _print_selection(selected, skip_reasons, total, available)
+    print("   确认后用 live/once + --limit 实盘 ===")
 
 
-async def _live(backend, tokens):
-    _place_once(backend, tokens)
+def _place_once(backend, tokens, limit):
+    selected, skip_reasons, total, available = _plan_markets(backend, tokens, limit)
+    print(f"\n=== 初挂（实盘）===")
+    _print_selection(selected, skip_reasons, total, available)
+    ok = fail = 0
+    placed_tokens = []
+    for mi, (_key, legs) in enumerate(selected):
+        for t, price, size in legs:
+            res = place_leg(backend, t, price, size)
+            if res.get("status") == "placed":
+                ok += 1
+                placed_tokens.append(t)
+                print(f"  ✅ [{mi+1}] {str(t['question'])[:30]} [{t.get('token_type')}] BUY@{price:.3f}×{size:.0f}")
+            else:
+                fail += 1
+                err = str(res.get("resp", res))[:70]
+                print(f"  ❌ [{mi+1}] {str(t['question'])[:30]} [{t.get('token_type')}] → {err}")
+    print(f"=== 初挂完成：成功 {ok}，失败 {fail} ===")
+    return placed_tokens
+
+
+async def _live(backend, tokens, limit):
+    placed = _place_once(backend, tokens, limit)
+    if not placed:
+        print("[runner] 无成功挂单，不进入守护循环。")
+        return
     mc = cfg.predictfun_monitor
     churn = ChurnGuard(mc.token_cooldown_sec, mc.max_cancels_per_hour)
     print("\n=== 进入守护循环（Ctrl+C 退出；退出不自动撤单,需要可单独跑 cancel）===")
-    await monitor_loop(backend, tokens, churn)
+    await monitor_loop(backend, placed, churn)
 
 
 def main() -> int:
@@ -146,19 +178,16 @@ def main() -> int:
         return 1
 
     if mode in ("live", "once") and limit is None:
-        print("✗ 实盘必须带 --limit N 控制市场数（防敞口失控）。例：live --limit 1")
+        print("✗ 实盘必须带 --limit N 控制市场数（防敞口失控）。例：once --limit 3")
         return 1
-    if limit is not None:
-        tokens, n_mk = _limit_markets(backend, tokens, limit)
-        print(f"[runner] 限定前 {n_mk} 个市场 → {len(tokens)} 个 token（每市场买 YES+买 NO）")
 
     if mode == "plan":
-        _plan(backend, tokens); return 0
+        _plan(backend, tokens, limit); return 0
     if mode == "once":
-        _place_once(backend, tokens); return 0
+        _place_once(backend, tokens, limit); return 0
     if mode == "live":
         try:
-            asyncio.run(_live(backend, tokens))
+            asyncio.run(_live(backend, tokens, limit))
         except KeyboardInterrupt:
             print("\n[runner] 收到中断,退出守护循环。挂单仍在（如需清场跑 `cancel`）。")
         return 0

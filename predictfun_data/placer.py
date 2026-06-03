@@ -1,16 +1,24 @@
-"""predict.fun 报价器（收尾 runner）—— 只买不裸卖,为积分farming定制。
+"""predict.fun 报价器（仿 Polymarket place_order_for_token，按真实薄簿校准）。
 
-关键约束(主网实测): predict.fun 不允许裸卖(create_order_insufficient_shares_balance)——
-挂 SELL 必须先持有该 outcome 份额。因此双边做市靠"买两个 outcome":
-  买 YES @ YES.bid  → 在共享簿里是 bid 侧
-  买 NO  @ NO.bid   → 在共享簿里是 ask 侧(NO.bid = 1 - YES.ask 的补价)
-两个都是 BUY,只需 USDT 抵押、无需持仓,且不自成交(buyYES + buyNO < 1)。
+只买不裸卖：双边做市靠"买两个 outcome"——买 YES（共享簿 bid 侧）+ 买 NO（=卖 YES，
+共享簿 ask 侧），两个都是 BUY、只需 USDT 抵押、不自成交（buyYES+buyNO<1）。故每个 outcome
+token 只挂"一张买单"。本模块为该买单选价+定量。
 
-故每个 outcome token 只挂"一张买单(贴其 bid 侧)"。一个市场的 YES+NO 两个 token 各一张买单,
-即在那一本簿上形成 bid+ask 双边,满足"双边"最大奖励。compute_bid 为纯函数。
+报价逻辑（对齐 Polymarket，阈值据 config.PredictFunPlaceConfig 校准成 predict.fun 薄盘版）：
+  1. 需双侧簿（可靠 mid）、前5档累计 ≥ min_top5_depth（滤掉死簿），否则不报价。
+  2. 贴价：在 mid±max_spread 奖励带内，**贴已有深度的最优档（最接近 mid，不抢内侧/不+1tick）**；
+     跳过灰尘档（<min_level_depth）。带内无现成档→不报价（下轮重试，绝不硬抢）。
+  3. 定量：动态量=前3档买侧深度×ratio/mid，**夹进 [min_size, max_order_size]**；薄市场自然落到
+     floor=min_size（=shareThreshold），即"缩量"。
+  4. 出场护栏：买入成交后须能把持仓卖回更低 bid 平仓（predict.fun 不能裸卖，但持仓后可卖）——
+     最近更低 bid 距我买价 ≤ exit_max_gap，且更低档累计深度 ≥ 我 notional × multiplier，否则不报价。
+
+纯函数（compute_quote / select_join_price / dynamic_size / exit_liquidity_ok）便于单测；
+place_bid 串起来下单。NO 侧用其自身（已 complement）的簿，逻辑对称。
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+from config.bot_config import cfg
 from . import units
 
 
@@ -18,31 +26,116 @@ def _ok(resp: Any) -> bool:
     return bool(resp) and resp.get("status") != "error"
 
 
-def compute_bid(
-    best_bid: float,
-    best_ask: float,
-    max_spread: Optional[float],
-    tick_size: float = 0.01,
-    improve_ticks: int = 1,
-) -> Optional[float]:
-    """该 outcome 的买价(贴 bid、改善 improve_ticks 抢内侧、不越过 ask、夹进奖励带下沿)。
+def _sorted_levels(book: Any) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
+    """book → (bids[(price,size)降序], asks[(price,size)升序])。空簿返回空列表。"""
+    bids = sorted(((float(b.price), float(b.size)) for b in (book.bids or [])),
+                  key=lambda x: x[0], reverse=True) if book else []
+    asks = sorted(((float(a.price), float(a.size)) for a in (book.asks or [])),
+                  key=lambda x: x[0]) if book else []
+    return bids, asks
 
-    需两侧簿(可靠 mid);无法安全报价返回 None。
+
+def select_join_price(
+    bids: List[Tuple[float, float]],
+    mid: float,
+    band: float,
+    min_level_depth: float,
+) -> Optional[Tuple[float, float]]:
+    """带内贴最优档（不改善）：返回 (price, depth)。
+
+    在 [mid-band, mid] 内、深度≥min_level_depth 的买档中，取**最接近 mid（价最高）**的一档
+    （奖励/Q-score 最高）。无合格档返回 None。bids 须按价降序。
     """
-    if not best_bid or not best_ask or best_bid <= 0 or best_ask <= 0:
-        return None
-    if best_bid >= best_ask:                 # 交叉/锁定簿
-        return None
-    mid = (best_bid + best_ask) / 2.0
-    buy = best_bid + max(0, int(improve_ticks)) * tick_size
-    if buy >= best_ask:                       # 改善会越过卖一 → 退为贴买一
-        buy = best_bid
-    if max_spread:                            # 奖励带下沿(买单须 ≥ mid - band 才计奖励)
-        buy = max(buy, mid - float(max_spread))
-    buy = units.price_to_tick(buy, tick_size)
-    if not (0.0 < buy < best_ask):
-        return None
-    return buy
+    lo = mid - band
+    for price, size in bids:                     # 已降序：第一个落带内且非灰尘的即最优
+        if price > mid:                          # 高于 mid 的买档不参与（越界/异常）
+            continue
+        if price < lo:                           # 低于带下沿：再往下都更低，停止
+            break
+        if price * size >= min_level_depth:
+            return price, price * size
+    return None
+
+
+def dynamic_size(
+    bids: List[Tuple[float, float]],
+    mid: float,
+    min_size: float,
+    ratio: float,
+    cap: float,
+) -> float:
+    """动态量=前3档买侧深度×ratio/mid，夹进 [min_size, cap]。薄市场落到 floor=min_size（缩量）。"""
+    top3 = sum(p * s for p, s in bids[:3])
+    target = (top3 * ratio / mid) if mid > 0 else 0.0
+    return float(round(min(max(target, min_size), cap)))
+
+
+def exit_liquidity_ok(
+    bids: List[Tuple[float, float]],
+    buy_price: float,
+    size: float,
+    max_gap: float,
+    multiplier: float,
+) -> Tuple[bool, str]:
+    """买入成交后能否卖回更低 bid 平仓：最近更低档距≤max_gap 且累计深度≥notional×mult。"""
+    nearest_lower: Optional[float] = None
+    support = 0.0
+    for price, sz in bids:                       # 降序
+        if price >= buy_price:
+            continue
+        if nearest_lower is None:
+            nearest_lower = price
+        if buy_price - price <= max_gap + 1e-9:
+            support += price * sz
+    if nearest_lower is None:
+        return False, "no_lower_bid"
+    if buy_price - nearest_lower > max_gap + 1e-9:
+        return False, f"gap_{buy_price - nearest_lower:.3f}"
+    need = buy_price * size * multiplier
+    if support < need:
+        return False, f"exit_depth_{support:.0f}<{need:.0f}"
+    return True, "ok"
+
+
+def compute_quote(
+    book: Any,
+    max_spread: Optional[float],
+    tick_size: float,
+    min_size: float,
+    pc=None,
+) -> Tuple[Optional[float], Optional[float], str]:
+    """该 outcome 买单的 (price, size, reason)。无法安全报价时 price=size=None、reason 说明原因。"""
+    pc = pc or cfg.predictfun_place
+    if not book:
+        return None, None, "no_book"
+    bids, asks = _sorted_levels(book)
+    if not bids or not asks:
+        return None, None, "one_sided"
+    bb, ba = bids[0][0], asks[0][0]
+    if bb <= 0 or ba <= 0 or bb >= ba:           # 交叉/锁定/无效
+        return None, None, "crossed_or_invalid"
+    if not max_spread or max_spread <= 0:
+        return None, None, "no_band"
+    mid = (bb + ba) / 2.0
+    top5 = sum(p * s for p, s in bids[:5])
+    if top5 < pc.min_top5_depth:
+        return None, None, f"thin_top5_{top5:.0f}"
+
+    band = float(max_spread)
+    pick = select_join_price(bids, mid, band, pc.min_level_depth)
+    if pick is None:
+        return None, None, "no_in_band_level"
+    price = units.price_to_tick(pick[0], tick_size)
+    if not (0.0 < price < ba):                    # 取整后不得越过卖一
+        return None, None, "bad_price_after_tick"
+
+    size = dynamic_size(bids, mid, min_size, pc.size_ratio, pc.max_order_size)
+
+    if pc.require_exit_liquidity:
+        ok, why = exit_liquidity_ok(bids, price, size, pc.exit_max_gap, pc.exit_depth_multiplier)
+        if not ok:
+            return None, None, f"exit_{why}"
+    return price, size, "ok"
 
 
 def _tick_for(backend: Any, token_id: str, tick_size: Optional[float]) -> float:
@@ -55,20 +148,29 @@ def _tick_for(backend: Any, token_id: str, tick_size: Optional[float]) -> float:
 def place_bid(
     backend: Any,
     token_info: Dict[str, Any],
-    best_bid: float,
-    best_ask: float,
+    book: Any,
     tick_size: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """为该 outcome token 挂一张买单(贴 bid)。size 取 shareThreshold(min_size,≥100)。
+    """为该 outcome token 挂一张买单（仿 Polymarket：带内贴最优档、动态量、出场护栏）。
 
-    neg_risk/yield/fee 由 backend.create_order 从注册表注入。
+    neg_risk/yield/fee 由 backend.create_order 从注册表注入。size 下限=token 的 min_size(≥100)。
     """
     tid = token_info["token_id"]
     tick = _tick_for(backend, tid, tick_size)
-    buy = compute_bid(best_bid, best_ask, token_info.get("max_spread"), tick)
-    if buy is None:
-        return {"status": "no_quote", "reason": "单侧簿/交叉"}
-    size = max(100.0, float(token_info.get("min_size", 0) or 0))
-    r = backend.create_order(tid, "BUY", buy, size)
-    return {"side": "BUY", "price": buy, "size": size,
+    min_size = max(100.0, float(token_info.get("min_size", 0) or 0))
+    price, size, reason = compute_quote(book, token_info.get("max_spread"), tick, min_size)
+    if price is None:
+        return {"status": "no_quote", "reason": reason}
+    return place_leg(backend, token_info, price, size)
+
+
+def place_leg(
+    backend: Any,
+    token_info: Dict[str, Any],
+    price: float,
+    size: float,
+) -> Dict[str, Any]:
+    """按既定 (price, size) 挂一张买单（价/量由上游预算配对决定）。只买不裸卖。"""
+    r = backend.create_order(token_info["token_id"], "BUY", float(price), float(size))
+    return {"side": "BUY", "price": float(price), "size": float(size),
             "status": "placed" if _ok(r) else "failed", "resp": r}
