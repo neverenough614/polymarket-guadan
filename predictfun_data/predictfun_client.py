@@ -7,7 +7,13 @@ import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from dotenv import load_dotenv
+
 from config.bot_config import PredictFunConfig
+
+# 进程启动即加载 .env（与 poly_data/polymarket_client.py 行为一致），
+# 使 PREDICTFUN_PK / _API_KEY / _ACCOUNT 等可从 .env 读取。
+load_dotenv()
 from .normalize import normalize_order, normalize_orderbook, batch_ids
 from . import units
 
