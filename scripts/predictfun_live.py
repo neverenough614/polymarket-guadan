@@ -62,7 +62,8 @@ def _stage_order(c):
     market_id = m.get("id")
     book = c.get_orderbook(market_id)
     outcomes = m.get("outcomes") or []
-    token_id = outcomes[0].get("tokenId") if outcomes else None
+    first = outcomes[0] if outcomes else {}
+    token_id = first.get("onChainId") or first.get("tokenId")  # predict.fun 用 onChainId
     print(f"[A] 目标市场 id={market_id} token_id={token_id} "
           f"best_bid={book.bids[0].price if book.bids else None}")
     if not token_id:

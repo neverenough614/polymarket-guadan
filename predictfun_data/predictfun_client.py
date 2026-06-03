@@ -211,7 +211,8 @@ class PredictFunClient:
     # ---- 资金 / 授权 / 仓位 ----
     def get_usdt_balance(self) -> float:
         # 智能账户模式下资金在 self.address（PREDICTFUN_ACCOUNT）；EOA 模式即签名地址
-        return float(self._builder.balance_of("USDT", address=self.address))
+        # balance_of 返回原始 wei(18 位)，转成人类可读的 USDT
+        return units.from_wei(self._builder.balance_of("USDT", address=self.address))
 
     def set_approvals(self) -> Any:
         return self._builder.set_approvals(is_yield_bearing=self._yield_default)

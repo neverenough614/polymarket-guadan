@@ -47,7 +47,7 @@ class FakeBuilder:
     def sign_typed_data_order(self, _typed):
         return FakeSignedOrder()
     def balance_of(self, _sym, address=None):
-        return 123.5
+        return 123_500000000000000000  # 原始 wei(18位)，from_wei 后 = 123.5
 
 
 class FakeRest:
