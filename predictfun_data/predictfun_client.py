@@ -193,6 +193,39 @@ class PredictFunClient:
         resp = self.rest.get_markets(**filters)
         return resp.get("data", resp) or []
 
+    def get_all_markets(self, status: str = "OPEN", page_size: int = 100,
+                        max_pages: int = 300, **filters) -> List[Dict[str, Any]]:
+        """游标分页拉取全部市场（predict.fun 用 `after`=cursor 翻页）。
+
+        max_pages 是失控保护；cursor 为空/不再变化即自然停止。
+        若耗尽 max_pages 但游标仍在（说明被截断）会打印告警，不静默吞掉剩余市场。
+        """
+        out: List[Dict[str, Any]] = []
+        cursor = None
+        seen_cursors = set()
+        for _ in range(max(1, max_pages)):
+            params = {"status": status, "first": page_size, **filters}
+            if cursor:
+                params["after"] = cursor
+            resp = self.rest.get_markets(**params)
+            if isinstance(resp, list):
+                rows, cursor = resp, None
+            elif isinstance(resp, dict):
+                rows, cursor = (resp.get("data") or []), resp.get("cursor")
+            else:
+                rows, cursor = [], None
+            if not rows:
+                break
+            out.extend(rows)
+            if not cursor or cursor in seen_cursors:
+                cursor = None       # 自然耗尽（游标空/重复）
+                break
+            seen_cursors.add(cursor)
+        if cursor:  # 退出循环时游标仍在 → 触达 max_pages 上限，未覆盖全量
+            print(f"⚠️ [get_all_markets] 达到 max_pages={max_pages} 上限仍有后续游标，"
+                  f"已拉取 {len(out)} 个市场但可能未覆盖全部。如需更全请调高 max_pages。")
+        return out
+
     def get_market(self, market_id) -> Dict[str, Any]:
         resp = self.rest.get_market(market_id)
         return resp.get("data", resp)

@@ -472,3 +472,6 @@ cython_debug/
 # Local worktrees and tooling
 .claude/
 .worktrees/
+
+# predict.fun 市场发现本地缓存(SP3)
+predictfun_strategy_tokens.json

@@ -107,6 +107,21 @@ class PredictFunConfig:
 
 
 @dataclass
+class PredictFunDiscoveryConfig:
+    """predict.fun 市场发现/选市配置（SP3）。
+
+    选市标准：只挑当前有 active LP 奖励的市场（对标 Polymarket 奖励捕获）。
+    复用同一个 Google spreadsheet，写入 predict.fun 专属标签页（不动 Polymarket 标签）。
+    """
+    selected_sheet: str = "PF Selected"          # 写入的 predict.fun 标签页名
+    page_size: int = 100                          # 市场分页大小（cursor 分页）
+    max_pages: int = 300                           # 分页上限保护（防失控；不足会告警不静默截断）
+    min_hourly_rate: float = 0.0                  # 奖励强度下限（>此值才视为 active）
+    max_markets: int = 0                          # 写表市场数上限（0=不限）
+    strategy_json_path: str = "predictfun_strategy_tokens.json"  # 本地缓存/兜底
+
+
+@dataclass
 class BotConfig:
     """总配置，聚合各子配置"""
     sheet: SheetConfig = field(default_factory=SheetConfig)
@@ -115,6 +130,7 @@ class BotConfig:
     spread_check: SpreadCheckConfig = field(default_factory=SpreadCheckConfig)
     defense: DefenseConfig = field(default_factory=DefenseConfig)
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
+    predictfun_discovery: PredictFunDiscoveryConfig = field(default_factory=PredictFunDiscoveryConfig)
 
 
 # 全局配置实例
