@@ -28,10 +28,10 @@ class FakeClient:
         )
 
     def create_order(self, token_id, side, price, size, neg_risk=False,
-                     is_yield_bearing=None, order_type="LIMIT", fee_rate_bps=0):
+                     is_yield_bearing=None, order_type="LIMIT", fee_rate_bps=0, tick_size=None):
         self.created.append(dict(token_id=token_id, side=side, price=price, size=size,
                                  neg_risk=neg_risk, is_yield_bearing=is_yield_bearing,
-                                 fee_rate_bps=fee_rate_bps))
+                                 fee_rate_bps=fee_rate_bps, tick_size=tick_size))
         return {"status": "live", "order_id": "o1"}
 
     def get_orderbook(self, market_id):
@@ -64,6 +64,7 @@ def test_create_order_injects_fee_yield_neg_from_registry():
     assert sent["is_yield_bearing"] is True
     assert sent["neg_risk"] is True
     assert sent["token_id"] == "YES"
+    assert sent["tick_size"] == 0.01            # 用该市场精度量化(decimalPrecision=2)
 
 
 def test_get_order_book_yes_returns_native():

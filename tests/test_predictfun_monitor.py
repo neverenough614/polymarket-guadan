@@ -87,21 +87,21 @@ def test_evaluate_none_does_nothing():
 
 def test_evaluate_recenter_cancels_and_places_when_allowed(monkeypatch):
     be = FakeBackend(); g = ChurnGuard(token_cooldown_sec=300, max_cancels_per_hour=999)
-    # 隔离定价：桩掉 _place_side，只验证编排（撤+双边补 + churn 记账）
-    calls = []
-    monkeypatch.setattr(mloop, "_place_side",
-                        lambda backend, ti, side, book, mid: calls.append(side) or {"side": side, "status": "placed"})
+    # 隔离定价：桩掉 place_for_token，只验证编排（撤+双边补 + churn 记账）
+    calls = {}
+    monkeypatch.setattr(mloop, "place_for_token",
+                        lambda backend, ti, bb, ba, sides, tick_size=None: calls.update(sides=set(sides)) or [{"status": "placed"}])
     res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.40, my_ask=0.52, churn=g, now=1.0)
     assert res["action"] == RECENTER
     assert be.cancelled == ["T"]            # 先撤
-    assert sorted(calls) == ["BUY", "SELL"] # 再双边重挂
+    assert calls["sides"] == {"BUY", "SELL"}  # 再双边重挂
     assert g.allow("T", now=2.0) is False   # 已记冷却（300s 内不可再动）
     assert g.remaining_budget(now=2.0) == 998  # RECENTER 计入撤单预算
 
 
 def test_evaluate_recenter_skipped_when_cooldown(monkeypatch):
     be = FakeBackend(); g = ChurnGuard(token_cooldown_sec=300, max_cancels_per_hour=999)
-    monkeypatch.setattr(mloop, "_place_side", lambda *a, **k: {"status": "placed"})
+    monkeypatch.setattr(mloop, "place_for_token", lambda *a, **k: [{"status": "placed"}])
     g.record("T", now=1.0)                  # 刚动过
     res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.40, my_ask=0.52, churn=g, now=100.0)
     assert res["action"] == "SKIPPED"
@@ -114,7 +114,7 @@ def test_recenter_records_cancel_even_when_place_raises(monkeypatch):
     be = FakeBackend(); g = ChurnGuard(token_cooldown_sec=300, max_cancels_per_hour=5)
     def boom(*a, **k):
         raise RuntimeError("create_order down")
-    monkeypatch.setattr(mloop, "_place_side", boom)
+    monkeypatch.setattr(mloop, "place_for_token", boom)
     res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.40, my_ask=0.52, churn=g, now=1.0)
     assert res["action"] == RECENTER
     assert be.cancelled == ["T"]                  # 撤单发生了
@@ -124,11 +124,11 @@ def test_recenter_records_cancel_even_when_place_raises(monkeypatch):
 
 def test_evaluate_refill_places_missing_side_without_cancel(monkeypatch):
     be = FakeBackend(); g = ChurnGuard(0, max_cancels_per_hour=1)
-    calls = []
-    monkeypatch.setattr(mloop, "_place_side",
-                        lambda backend, ti, side, book, mid: calls.append(side) or {"side": side, "status": "placed"})
+    calls = {}
+    monkeypatch.setattr(mloop, "place_for_token",
+                        lambda backend, ti, bb, ba, sides, tick_size=None: calls.update(sides=set(sides)) or [{"status": "placed"}])
     res = mloop.evaluate_and_execute(be, TOKEN, my_bid=None, my_ask=0.51, churn=g, now=1.0)
     assert res["action"] == REFILL
     assert be.cancelled == []               # 不撤好单
-    assert calls == ["BUY"]                 # 只补缺失的买侧
+    assert calls["sides"] == {"BUY"}        # 只补缺失的买侧
     assert g.remaining_budget(now=1.0) == 1 # 补单不耗撤单预算

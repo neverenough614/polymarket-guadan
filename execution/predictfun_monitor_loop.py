@@ -13,44 +13,10 @@ import asyncio
 from typing import Any, Callable, Dict, List, Optional
 
 from config.bot_config import cfg
-from orderbook.analyzer import (
-    get_orderbook_info, analyze_best_place_price_from_book, calculate_dynamic_size,
-)
+from orderbook.analyzer import get_orderbook_info
 from predictfun_data.monitor import decide_action, NONE
 from predictfun_data.churn_guard import ChurnGuard
-
-
-def _order_size(token_info: Dict[str, Any], book: Any, mid: Optional[float]) -> Optional[float]:
-    """挂单量：满足 shareThreshold(min_size) 下限；优先用动态量，回退底量。"""
-    base = max(100.0, float(token_info.get("min_size", 0) or 0))
-    try:
-        sz = calculate_dynamic_size(book, mid, base, volatility_sum=0.0,
-                                    size_ratio=cfg.place.NORMAL_SIZE_RATIO,
-                                    max_order_size=cfg.place.NORMAL_MAX_ORDER_SIZE)
-        if sz:
-            return sz
-    except Exception:
-        pass
-    return base
-
-
-def _place_side(backend: Any, token_info: Dict[str, Any], side: str,
-                book: Any, mid: Optional[float]) -> Dict[str, Any]:
-    """在 book 内为单侧挂一张奖励价带内的真实可成交单。"""
-    token_id = token_info["token_id"]
-    max_spread = token_info.get("max_spread")
-    neg_risk = bool(token_info.get("neg_risk", False))
-    size = _order_size(token_info, book, mid)
-    if not size:
-        return {"side": side, "status": "no_size"}
-    res = analyze_best_place_price_from_book(book, side, max_spread, mid, size)
-    if not res:
-        return {"side": side, "status": "no_price"}
-    price = res[0]
-    resp = backend.create_order(token_id, side, price, size, neg_risk=neg_risk)
-    ok = bool(resp) and resp.get("status") != "error"
-    return {"side": side, "status": "placed" if ok else "failed",
-            "price": price, "size": size, "resp": resp}
+from predictfun_data.placer import place_for_token
 
 
 def evaluate_and_execute(
@@ -67,7 +33,7 @@ def evaluate_and_execute(
     token_id = token_info["token_id"]
     max_spread = token_info.get("max_spread")
 
-    book, _bb, _ba, mid = get_orderbook_info(backend, token_id)
+    book, best_bid, best_ask, mid = get_orderbook_info(backend, token_id)
     decision = decide_action(
         my_bid, my_ask, mid, max_spread,
         deadband_ticks=mcfg.recenter_deadband_ticks,
@@ -91,14 +57,16 @@ def evaluate_and_execute(
         # 否则冷却未武装→下轮可能再撤→撤单循环→predict.fun 反作弊清零。
         churn.record(token_id, now, count_as_cancel=True)
 
+    sides = set()
+    if decision.place_buy:
+        sides.add("BUY")
+    if decision.place_sell:
+        sides.add("SELL")
     try:
-        if decision.place_buy:
-            placed.append(_place_side(backend, token_info, "BUY", book, mid))
-        if decision.place_sell:
-            placed.append(_place_side(backend, token_info, "SELL", book, mid))
+        placed = place_for_token(backend, token_info, best_bid, best_ask, sides)
     except Exception as e:
         # 补单失败不致命：撤单已记账、冷却已武装；下轮缺侧走 REFILL(不撤)，不会撤单循环。
-        placed.append({"status": "error", "error": str(e)})
+        placed = [{"status": "error", "error": str(e)}]
 
     if not decision.cancel_first:   # REFILL：纯补单，结束时记冷却(不计撤单预算)
         churn.record(token_id, now, count_as_cancel=False)

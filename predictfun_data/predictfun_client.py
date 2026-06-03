@@ -114,11 +114,14 @@ class PredictFunClient:
 
     # ---- 下单 ----
     def create_order(self, token_id, side, price, size, neg_risk=False,
-                     is_yield_bearing=None, order_type="LIMIT", fee_rate_bps=0) -> Dict[str, Any]:
+                     is_yield_bearing=None, order_type="LIMIT", fee_rate_bps=0,
+                     tick_size=None) -> Dict[str, Any]:
         yb = self._yield_default if is_yield_bearing is None else is_yield_bearing
         try:
             sdk_side, LimitHelperInput, BuildOrderInput = self._sdk_order_types(side)
-            pps_wei = units.price_per_share_wei(price, self.cfg.tick_size)
+            # tick 须用该市场实际精度(decimalPrecision)；缺省退回全局 cfg.tick_size。
+            # 否则 3 位小数市场(如 0.103)会被 0.01 量化成 0.10，价格错位、落到盘口之后。
+            pps_wei = units.price_per_share_wei(price, tick_size or self.cfg.tick_size)
             amounts = self._builder.get_limit_order_amounts(LimitHelperInput(
                 side=sdk_side,
                 price_per_share_wei=pps_wei,

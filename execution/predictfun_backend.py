@@ -37,10 +37,16 @@ class PredictFunBackend(IExecutionBackend):
                 count += 1
         return count
 
-    def refresh_markets(self, **filters: Any) -> int:
-        """从 API 拉取市场并登记（默认 OPEN）。返回登记的 token 数。"""
-        params = {"status": "OPEN", **filters}
-        markets = self._client.get_markets(**params)
+    def refresh_markets(self, status: str = "OPEN", paginate: bool = True, **filters: Any) -> int:
+        """从 API 拉取市场并登记。返回登记的 token 数。
+
+        paginate=True（默认）游标分页拉全量——实盘 runner 需要把所有可能交易的市场都登记
+        （否则 create_order 缺 fee/yield、get_order_book 定位不到 market_id）。
+        """
+        if paginate and hasattr(self._client, "get_all_markets"):
+            markets = self._client.get_all_markets(status=status, **filters)
+        else:
+            markets = self._client.get_markets(status=status, **filters)
         return self.register_markets(markets)
 
     def meta_for(self, token_id: str) -> Optional[TokenMeta]:
@@ -64,6 +70,7 @@ class PredictFunBackend(IExecutionBackend):
                 neg_risk=meta.neg_risk,
                 is_yield_bearing=meta.yield_bearing,
                 fee_rate_bps=meta.fee_rate_bps,
+                tick_size=meta.tick_size,        # 用该市场实际精度量化价格
             )
         # 未注册：fee_rate_bps 未知会被服务端拒；快速失败而非盲发（fail fast）。
         # IExecutionBackend 调用方（place_order_for_token）已包 try/except，异常会被记为 error 状态。
