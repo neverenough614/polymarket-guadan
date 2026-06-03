@@ -48,10 +48,14 @@ def _stage_readonly(c):
 
 
 def _stage_approve(c):
-    print("[A] 执行链上授权 set_approvals（会烧 gas，可能要等几秒）...")
-    res = c.set_approvals()
-    print(f"[B] 授权结果：{res}")
-    print("✓ 授权完成（一次性）。")
+    # 你的市场是 yield-bearing，按 is_yield_bearing=True 授权（覆盖 标准+NegRisk 交易所 + 适配器）
+    print("[A] 执行 set_approvals(is_yield_bearing=True)（会发链上交易，可能要等几秒）...")
+    res = c.set_approvals(is_yield_bearing=True)
+    ok = getattr(res, "success", None)
+    print(f"[B] 总体 success={ok}")
+    for i, t in enumerate(getattr(res, "transactions", []) or []):
+        print(f"    tx[{i}]: {t!r}")
+    print("✓ 授权完成（一次性）。" if ok else "⚠ 有授权失败，看上面每笔 cause（可能缺 BNB gas）。")
 
 
 def _stage_order(c):

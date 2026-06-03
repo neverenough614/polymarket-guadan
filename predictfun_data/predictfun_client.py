@@ -225,8 +225,9 @@ class PredictFunClient:
         # balance_of 返回原始 wei(18 位)，转成人类可读的 USDT
         return units.from_wei(self._builder.balance_of("USDT", address=self.address))
 
-    def set_approvals(self) -> Any:
-        return self._builder.set_approvals(is_yield_bearing=self._yield_default)
+    def set_approvals(self, is_yield_bearing=None) -> Any:
+        yb = self._yield_default if is_yield_bearing is None else is_yield_bearing
+        return self._builder.set_approvals(is_yield_bearing=yb)
 
     def merge_positions(self, condition_id, amount, is_neg_risk=False, is_yield_bearing=None):
         yb = self._yield_default if is_yield_bearing is None else is_yield_bearing
