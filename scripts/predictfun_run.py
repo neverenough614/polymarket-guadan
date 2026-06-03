@@ -86,13 +86,13 @@ def _quote_fn(backend):
 def _plan_markets(backend, tokens, n_markets):
     """分组→排序→（按市场数上限截断）→报价配对→预算守门。返回 (selected, skip_reasons, total)。"""
     markets = _group_markets(backend, tokens)
-    if n_markets and n_markets > 0:
-        markets = markets[:n_markets]
     # 可用抵押=链上总额−已挂买单预扣（重启/重复下单也不会超额授信）
     total_bal = backend.raw_client.get_usdt_balance()
     available = available_after_open_buys(total_bal, backend.get_all_orders())
+    # n_markets=目标挂满的市场数（懒求值：扫到选满即停，自动跳过单边/预算不足的市场）
+    cap = n_markets if (n_markets and n_markets > 0) else None
     selected, skip_reasons, total, _dropped = build_plan(
-        markets, _quote_fn(backend), _min_size, available, safety=SAFETY,
+        markets, _quote_fn(backend), _min_size, available, safety=SAFETY, max_markets=cap,
     )
     return selected, skip_reasons, total, available
 
@@ -129,36 +129,54 @@ def _plan(backend, tokens, limit):
     print("   确认后用 live/once + --limit 实盘 ===")
 
 
+def _live_buy_token_ids(backend):
+    """已有 live 买单的 token 集合（幂等下单用：已挂的不重复挂）。"""
+    try:
+        grouped = backend.get_all_my_orders_grouped()
+        return {tid for tid, info in grouped.items() if info.get("best_bid") is not None}
+    except Exception:
+        return set()
+
+
 def _place_once(backend, tokens, limit):
     selected, skip_reasons, total, available = _plan_markets(backend, tokens, limit)
-    print(f"\n=== 初挂（实盘）===")
+    print(f"\n=== 初挂（实盘，幂等：已挂的不重复挂）===")
     _print_selection(selected, skip_reasons, total, available)
-    ok = fail = 0
-    placed_tokens = []
+    existing = _live_buy_token_ids(backend)
+    ok = fail = kept = 0
+    target_tokens = []          # 目标在挂的全部 token（已存在 + 新挂成功）→ 交给监控
     for mi, (_key, legs) in enumerate(selected):
         for t, price, size in legs:
+            tid = str(t["token_id"])
+            if tid in existing:
+                kept += 1
+                target_tokens.append(t)
+                print(f"  ⏭️ [{mi+1}] {str(t['question'])[:30]} [{t.get('token_type')}] 已有挂单，跳过")
+                continue
             res = place_leg(backend, t, price, size)
             if res.get("status") == "placed":
                 ok += 1
-                placed_tokens.append(t)
+                target_tokens.append(t)
                 print(f"  ✅ [{mi+1}] {str(t['question'])[:30]} [{t.get('token_type')}] BUY@{price:.3f}×{size:.0f}")
             else:
                 fail += 1
                 err = str(res.get("resp", res))[:70]
                 print(f"  ❌ [{mi+1}] {str(t['question'])[:30]} [{t.get('token_type')}] → {err}")
-    print(f"=== 初挂完成：成功 {ok}，失败 {fail} ===")
-    return placed_tokens
+    print(f"=== 初挂完成：新挂 {ok}，已存在 {kept}，失败 {fail}（在挂 token {len(target_tokens)}）===")
+    return target_tokens
 
 
 async def _live(backend, tokens, limit):
-    placed = _place_once(backend, tokens, limit)
-    if not placed:
-        print("[runner] 无成功挂单，不进入守护循环。")
+    # _place_once 内有同步 SDK 调用(get_usdt_balance/签名)，必须在工作线程跑，
+    # 否则 predict-sdk 会拒绝"async 上下文里调同步方法"。
+    target = await asyncio.to_thread(_place_once, backend, tokens, limit)
+    if not target:
+        print("[runner] 无在挂订单，不进入守护循环。")
         return
     mc = cfg.predictfun_monitor
     churn = ChurnGuard(mc.token_cooldown_sec, mc.max_cancels_per_hour)
-    print("\n=== 进入守护循环（Ctrl+C 退出；退出不自动撤单,需要可单独跑 cancel）===")
-    await monitor_loop(backend, placed, churn)
+    print("\n=== 进入守护循环（盯订单簿变化防御 + auto_close；Ctrl+C 退出不自动撤单）===")
+    await monitor_loop(backend, target, churn)
 
 
 def main() -> int:

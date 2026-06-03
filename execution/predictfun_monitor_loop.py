@@ -18,6 +18,15 @@ from predictfun_data.monitor import decide_action, NONE
 from predictfun_data.churn_guard import ChurnGuard
 from predictfun_data.placer import place_bid
 from predictfun_data.auto_close import run_auto_close
+from predictfun_data.defense import DefenseState, evaluate_defense
+
+
+def _sorted_tuples(book):
+    bids = sorted(((float(b.price), float(b.size)) for b in (book.bids or [])),
+                  key=lambda x: x[0], reverse=True) if book else []
+    asks = sorted(((float(a.price), float(a.size)) for a in (book.asks or [])),
+                  key=lambda x: x[0]) if book else []
+    return bids, asks
 
 
 def evaluate_and_execute(
@@ -27,13 +36,36 @@ def evaluate_and_execute(
     churn: ChurnGuard,
     now: float,
     mcfg=None,
+    defense_state: Optional[DefenseState] = None,
 ) -> Dict[str, Any]:
-    """单 token：评估其买单并（受 churn 放行后）执行。my_bid=我在该 token 的买价(None=无单)。"""
+    """单 token：先盯订单簿变化防御，再常规维护买单（均受 churn 放行）。my_bid=我的买价(None=无单)。"""
     mcfg = mcfg or cfg.predictfun_monitor
     token_id = token_info["token_id"]
     max_spread = token_info.get("max_spread")
 
     book, best_bid, best_ask, mid = get_orderbook_info(backend, token_id)
+
+    # ── 防御：盯订单簿深度变化（前墙消失/同档被吃/高水位/趋势/偏斜）──
+    if (mcfg.enable_defense and defense_state is not None
+            and book is not None and my_bid is not None):
+        bids, asks = _sorted_tuples(book)
+        my_size = max(100.0, float(token_info.get("min_size", 0) or 0))
+        triggered, reasons = evaluate_defense(defense_state, bids, asks, my_bid, my_size, best_bid)
+        if triggered:
+            if not churn.allow(token_id, now, count_as_cancel=True):
+                # 撤单预算/冷却用尽 → 降级为仅告警（不撤，防反作弊），下轮再判
+                return {"token_id": token_id, "action": "DEFENSE_ALERT",
+                        "reason": "; ".join(reasons), "defended": False}
+            try:
+                backend.cancel_all_asset(token_id)
+                churn.record(token_id, now, count_as_cancel=True)
+                defense_state.reset()
+            except Exception as e:
+                return {"token_id": token_id, "action": "ERROR", "reason": f"defense cancel failed: {e}"}
+            # 撤后持仓由循环顶部 run_auto_close 处理；冷却到期后 REFILL 重挂
+            return {"token_id": token_id, "action": "DEFEND", "reason": "; ".join(reasons),
+                    "defended": True}
+
     decision = decide_action(
         my_bid, mid, max_spread,
         deadband_ticks=mcfg.recenter_deadband_ticks,
@@ -79,8 +111,10 @@ async def monitor_loop(
     churn = churn or ChurnGuard(mcfg.token_cooldown_sec, mcfg.max_cancels_per_hour)
     now_fn = now_fn or time.time
     by_id = {str(t["token_id"]): t for t in strategy_tokens}
+    defense_states: Dict[str, DefenseState] = {tid: DefenseState() for tid in by_id}
     print(f"🛡️ [predict.fun 监控] 启动：{len(by_id)} 个 token，轮询 {mcfg.poll_interval_sec}s，"
-          f"冷却 {mcfg.token_cooldown_sec}s，撤单预算 {mcfg.max_cancels_per_hour}/h（稳挂少动）")
+          f"冷却 {mcfg.token_cooldown_sec}s，撤单预算 {mcfg.max_cancels_per_hour}/h，"
+          f"防御={'开' if mcfg.enable_defense else '仅告警'}（盯订单簿变化）")
 
     if not hasattr(backend, "get_all_my_orders_grouped"):
         # 契约缺失时绝不能把所有 token 当"无单"处理（会触发全量补单 churn）→ 直接拒绝启动。
@@ -96,19 +130,27 @@ async def monitor_loop(
             except Exception as e:
                 print(f"⚠️ [auto_close] 本轮跳过：{e}")
 
-            grouped = backend.get_all_my_orders_grouped()
-            acted = 0
+            grouped = await asyncio.to_thread(backend.get_all_my_orders_grouped)
+            acted = defended = 0
             for tid, token_info in by_id.items():
                 info = grouped.get(tid, {})
                 my_bid = info.get("best_bid")   # 我在该 token 上的买价(只挂买单)
+                if my_bid is None and tid in defense_states:
+                    defense_states[tid].reset()  # 无单→重置防御基线，避免拿旧墙误判
                 res = await asyncio.to_thread(
-                    evaluate_and_execute, backend, token_info, my_bid, churn, now_fn(), mcfg
+                    evaluate_and_execute, backend, token_info, my_bid, churn, now_fn(),
+                    mcfg, defense_states.get(tid),
                 )
-                if res.get("action") not in (NONE, "SKIPPED"):
+                act = res.get("action")
+                if act in ("DEFEND", "DEFENSE_ALERT"):
+                    defended += 1
+                    icon = "🛑" if act == "DEFEND" else "⚠️"
+                    print(f"   {icon} [{act}] {str(token_info.get('question'))[:34]} → {res.get('reason')}")
+                elif act not in (NONE, "SKIPPED"):
                     acted += 1
-                    print(f"   🛡️ [{res['action']}] {str(token_info.get('question'))[:36]} → {res.get('reason')}")
-            if acted:
-                print(f"🛡️ [predict.fun 监控] 本轮动作 {acted} 个（预算余 {churn.remaining_budget(now_fn())}/h）")
+                    print(f"   🛡️ [{act}] {str(token_info.get('question'))[:36]} → {res.get('reason')}")
+            if acted or defended:
+                print(f"🛡️ [predict.fun 监控] 维护 {acted} / 防御 {defended}（撤单预算余 {churn.remaining_budget(now_fn())}/h）")
         except Exception as e:
             print(f"❌ [predict.fun 监控] 轮询出错：{e}")
             import traceback

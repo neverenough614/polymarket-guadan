@@ -58,9 +58,11 @@ def select_within_budget(
     market_legs: List[Tuple[Any, List[Leg]]],
     available: float,
     safety: float = 0.95,
+    max_markets: Optional[int] = None,
 ) -> Tuple[List[Tuple[Any, List[Leg]]], float, int]:
     """market_legs 已按奖励降序 [(market_key, legs)]。贪心累计预扣 ≤ available×safety。
 
+    max_markets：选满这么多市场就停（None=不限，仅受预算约束）。
     返回 (selected, total_cost, dropped_for_budget)。cost≈size/市场，故预算耗尽后基本全跳。
     """
     budget = max(0.0, available) * safety
@@ -70,6 +72,8 @@ def select_within_budget(
     for key, legs in market_legs:
         if not legs:
             continue
+        if max_markets is not None and len(selected) >= max_markets:
+            break                          # 已选满目标市场数
         cost = market_cost(legs)
         if total + cost <= budget:        # 严格上限；5% 安全边际已吸收浮点噪声
             selected.append((key, legs))
@@ -85,23 +89,33 @@ def build_plan(
     min_size_fn: Callable[[List[Dict[str, Any]]], float],
     available: float,
     safety: float = 0.95,
+    max_markets: Optional[int] = None,
 ) -> Tuple[List[Tuple[Any, List[Leg]]], Dict[str, int], float, int]:
-    """串起来：对每个市场报价→配对→预算守门。
+    """串起来：对每个市场报价→配对→预算守门（懒求值：选满 max_markets 即停止取簿）。
 
     markets: [(market_key, [outcome_token,...])] 已按奖励降序。
     quote_fn(token)->(token,price,size,reason)；min_size_fn(tokens)->该市场 min_size。
+    max_markets：目标挂满的市场数（None=不限）。懒求值避免对全部候选取簿。
     返回 (selected_market_legs, skip_reasons, total_cost, dropped_for_budget)。
     """
-    paired: List[Tuple[Any, List[Leg]]] = []
+    budget = max(0.0, available) * safety
+    selected: List[Tuple[Any, List[Leg]]] = []
     skip_reasons: Dict[str, int] = {}
+    total = 0.0
+    dropped = 0
     for key, tokens in markets:
+        if max_markets is not None and len(selected) >= max_markets:
+            break                          # 选满目标，停止继续取簿（省 API）
         quotes = [quote_fn(t) for t in tokens]
         legs, reason = pair_market_legs(quotes, min_size_fn(tokens))
-        if legs:
-            paired.append((key, legs))
-        else:
+        if not legs:
             skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
-    selected, total, dropped = select_within_budget(paired, available, safety)
-    if dropped:
-        skip_reasons["budget_exhausted"] = skip_reasons.get("budget_exhausted", 0) + dropped
+            continue
+        cost = market_cost(legs)
+        if total + cost <= budget:
+            selected.append((key, legs))
+            total += cost
+        else:
+            dropped += 1
+            skip_reasons["budget_exhausted"] = skip_reasons.get("budget_exhausted", 0) + 1
     return selected, skip_reasons, total, dropped

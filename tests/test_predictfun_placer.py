@@ -3,7 +3,7 @@
 双边靠"买 YES + 买 NO"(买 NO=卖 YES)实现,故每个 token 只算/挂一张买单。
 """
 from predictfun_data.placer import (
-    select_join_price, dynamic_size, exit_liquidity_ok, compute_quote, place_bid,
+    select_join_price, exit_liquidity_ok, compute_quote, place_bid,
 )
 from predictfun_data.normalize import NormalizedBook, BookLevel
 from config.bot_config import PredictFunPlaceConfig
@@ -31,16 +31,12 @@ def test_join_none_when_no_in_band_level():
     assert select_join_price([(0.40, 9999)], mid=0.50, band=0.06, min_level_depth=15) is None
 
 
-# ---------- dynamic_size：动态量夹进 [min_size, cap] ----------
-def test_size_floors_to_min_in_thin_book():
-    # 前3档深仅 30 USDT，×0.3/0.5=18 份 < min_size(100) → 落到 floor 100（缩量）
-    bids = [(0.5, 40), (0.49, 12), (0.48, 8)]
-    assert dynamic_size(bids, mid=0.5, min_size=100, ratio=0.3, cap=500) == 100.0
-
-
-def test_size_scales_with_depth_and_caps():
-    bids = [(0.5, 4000), (0.49, 3000), (0.48, 2000)]  # top3≈4470 USDT ×0.3/0.5≈2682 → cap 500
-    assert dynamic_size(bids, mid=0.5, min_size=100, ratio=0.3, cap=500) == 500.0
+# ---------- 固定 min_size：compute_quote 永远按 min_size 报，不随簿深放大 ----------
+def test_quote_size_is_fixed_min_size_not_dynamic():
+    # 极厚簿也只报 min_size（监控重挂走同函数，必须与预算两腿同量一致，不能逃逸预算）
+    book = _book([(0.49, 9000), (0.47, 9000), (0.45, 9000)], [(0.51, 9000)])
+    _price, size, reason = compute_quote(book, max_spread=0.06, tick_size=0.01, min_size=100, pc=PC)
+    assert reason == "ok" and size == 100.0
 
 
 # ---------- exit_liquidity_ok：买入成交后能否卖回更低 bid ----------

@@ -85,6 +85,14 @@ def test_budget_stops_when_exhausted():
     assert total <= 362.0 * 0.95 + 1e-9
 
 
+def test_budget_caps_at_max_markets():
+    # 预算够 4 个，但 max_markets=2 → 只选 2（按降序前 2）
+    markets = [("m1", _legs(0.10, 0.89, 100)), ("m2", _legs(0.20, 0.79, 100)),
+               ("m3", _legs(0.30, 0.69, 100)), ("m4", _legs(0.40, 0.59, 100))]
+    selected, total, _ = select_within_budget(markets, available=1000.0, safety=0.95, max_markets=2)
+    assert len(selected) == 2 and [k for k, _ in selected] == ["m1", "m2"]
+
+
 def test_budget_skips_empty_legs():
     markets = [("m1", []), ("m2", _legs(0.10, 0.89, 100))]
     selected, total, dropped = select_within_budget(markets, available=362.0)

@@ -3,6 +3,7 @@ import execution.predictfun_monitor_loop as mloop
 from predictfun_data.churn_guard import ChurnGuard
 from predictfun_data.monitor import decide_action, NONE, REFILL, RECENTER
 from predictfun_data.normalize import NormalizedBook, BookLevel
+from predictfun_data.defense import DefenseState
 
 
 # ---------- ChurnGuard ----------
@@ -112,6 +113,26 @@ def test_evaluate_recenter_skipped_when_cooldown(monkeypatch):
     res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.40, churn=g, now=100.0)
     assert res["action"] == "SKIPPED"
     assert be.cancelled == []               # 冷却中不撤
+
+
+def test_defense_cancels_and_records_when_front_wall_vanishes():
+    # 防御：上轮厚前墙(last_front 高)，本轮 book 前墙塌光 → 撤单 + 计 churn 预算
+    be = FakeBackend(); g = ChurnGuard(token_cooldown_sec=180, max_cancels_per_hour=60)
+    st = DefenseState(); st.first_run = False; st.last_front = 500.0; st.front_hw = 500.0
+    # book: 我买 0.49，前墙(>0.49)为 0 → 前墙消失
+    res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.49, churn=g, now=1.0, defense_state=st)
+    assert res["action"] == "DEFEND" and res["defended"] is True
+    assert be.cancelled == ["T"]                    # 防御撤单
+    assert g.remaining_budget(now=2.0) == 59         # 计入撤单预算
+    assert st.first_run is True                      # 撤后重置基线
+
+
+def test_defense_alerts_only_when_budget_exhausted():
+    be = FakeBackend(); g = ChurnGuard(token_cooldown_sec=180, max_cancels_per_hour=0)  # 预算0
+    st = DefenseState(); st.first_run = False; st.last_front = 500.0; st.front_hw = 500.0
+    res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.49, churn=g, now=1.0, defense_state=st)
+    assert res["action"] == "DEFENSE_ALERT" and res["defended"] is False
+    assert be.cancelled == []                        # 预算用尽→仅告警不撤（防反作弊）
 
 
 def test_evaluate_refill_places_without_cancel(monkeypatch):

@@ -8,12 +8,12 @@ token 只挂"一张买单"。本模块为该买单选价+定量。
   1. 需双侧簿（可靠 mid）、前5档累计 ≥ min_top5_depth（滤掉死簿），否则不报价。
   2. 贴价：在 mid±max_spread 奖励带内，**贴已有深度的最优档（最接近 mid，不抢内侧/不+1tick）**；
      跳过灰尘档（<min_level_depth）。带内无现成档→不报价（下轮重试，绝不硬抢）。
-  3. 定量：动态量=前3档买侧深度×ratio/mid，**夹进 [min_size, max_order_size]**；薄市场自然落到
-     floor=min_size（=shareThreshold），即"缩量"。
+  3. 定量：**固定 min_size（=shareThreshold 下限，≥100）**。predict.fun 挂买单预扣抵押，全靠预算
+     守门控市场数；监控重挂也走本函数，故尺寸必须与预算配对一致，绝不用动态量（否则逃逸预算）。
   4. 出场护栏：买入成交后须能把持仓卖回更低 bid 平仓（predict.fun 不能裸卖，但持仓后可卖）——
      最近更低 bid 距我买价 ≤ exit_max_gap，且更低档累计深度 ≥ 我 notional × multiplier，否则不报价。
 
-纯函数（compute_quote / select_join_price / dynamic_size / exit_liquidity_ok）便于单测；
+纯函数（compute_quote / select_join_price / exit_liquidity_ok）便于单测；
 place_bid 串起来下单。NO 侧用其自身（已 complement）的簿，逻辑对称。
 """
 from typing import Any, Dict, List, Optional, Tuple
@@ -55,19 +55,6 @@ def select_join_price(
         if price * size >= min_level_depth:
             return price, price * size
     return None
-
-
-def dynamic_size(
-    bids: List[Tuple[float, float]],
-    mid: float,
-    min_size: float,
-    ratio: float,
-    cap: float,
-) -> float:
-    """动态量=前3档买侧深度×ratio/mid，夹进 [min_size, cap]。薄市场落到 floor=min_size（缩量）。"""
-    top3 = sum(p * s for p, s in bids[:3])
-    target = (top3 * ratio / mid) if mid > 0 else 0.0
-    return float(round(min(max(target, min_size), cap)))
 
 
 def exit_liquidity_ok(
@@ -129,7 +116,9 @@ def compute_quote(
     if not (0.0 < price < ba):                    # 取整后不得越过卖一
         return None, None, "bad_price_after_tick"
 
-    size = dynamic_size(bids, mid, min_size, pc.size_ratio, pc.max_order_size)
+    # 固定 min_size（=shareThreshold 下限）：predict.fun 挂买单预扣抵押，且监控重挂也走本函数，
+    # 必须与预算配对的两腿同量(min_size)一致——绝不能用动态量，否则重挂会逃逸预算+破坏两腿同量+超额锁仓。
+    size = float(min_size)
 
     if pc.require_exit_liquidity:
         ok, why = exit_liquidity_ok(bids, price, size, pc.exit_max_gap, pc.exit_depth_multiplier)

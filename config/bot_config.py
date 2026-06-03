@@ -180,18 +180,54 @@ class PredictFunPlaceConfig:
 
 @dataclass
 class PredictFunMonitorConfig:
-    """predict.fun 监控/防御配置（SP5）—— 基调：稳挂少动，避开反作弊清零。
+    """predict.fun 监控/防御配置（SP5）—— 盯订单簿变化 + churn 限流防清零。
 
-    predict.fun 奖励=PP 积分，且会对"撤单滥用/挂不可成交单"整号清零。故防御逻辑
-    与 Polymarket 现网相反：不抢档、不高频撤重挂，只在"订单脱离奖励价带"或"一侧成交"
-    时克制地补救，并受冷却 + 全局撤单预算双重限流。无 WebSocket，用温和轮询。
+    predict.fun 奖励=PP 积分，且会对"撤单滥用/挂不可成交单"整号清零。故：监控逻辑仿
+    Polymarket（盯深度变化做防御撤单），但所有撤单经 ChurnGuard 限流（冷却+小时预算），
+    预算用尽则降级为只告警不撤（ENABLE 风格）。无 WebSocket，用轮询；防御要响应及时，
+    故轮询比纯farming更快（默认 20s）。
     """
-    poll_interval_sec: int = 90          # 轮询间隔（温和；240/min 限速下绰绰有余）
-    token_cooldown_sec: int = 300        # 同一 token 两次撤/挂动作最小间隔（5 分钟）
+    poll_interval_sec: int = 20          # 轮询间隔（防御需较快捕捉墙变化；240/min 限速下安全）
+    token_cooldown_sec: int = 180        # 同一 token 两次撤/挂动作最小间隔
     max_cancels_per_hour: int = 60       # 全局滚动 1h 撤单预算上限（反作弊护栏）
     recenter_deadband_ticks: float = 1.0 # 出带滞回：超出奖励价带 >此 tick 数才重心（防抖）
     refill_on_fill: bool = True          # 一侧完全成交后补回该侧（维持双边=最大奖励）
     min_two_sided: bool = True           # 缺一侧即视为需补单（双边才拿满奖励）
+    enable_defense: bool = True          # 是否启用订单簿变化防御（关=仅告警不撤）
+
+
+@dataclass
+class PredictFunDefenseConfig:
+    """predict.fun 订单簿变化防御阈值（仿 Polymarket，按真实薄簿校准）。
+
+    百分比门槛（单轮/高水位/趋势跌幅、偏斜比）尺度无关，沿用 Polymarket；绝对深度门槛
+    （前墙/同档 USDT）按 predict.fun 真实薄簿大幅下调——实测 top40：前墙中位411/p25 52、
+    同档中位286/p25 104。薄簿噪声大，单轮/同档跌幅阈值取偏大值以免误撤（撤多了触发反作弊）。
+    """
+    extreme_threshold: float = 0.10       # 极端价（≤0.10 或 ≥0.90）用更敏感参数
+    front_present: float = 50.0           # 前墙"存在"判定门槛 USDT（Polymarket 100）
+    front_absolute: float = 30.0          # 前墙绝对兜底 USDT（Polymarket 100）
+    front_absolute_ref: float = 0.0       # 高水位>此值才启用绝对兜底（0=总启用）
+    same_safe: float = 80.0               # 同档安全深度 USDT（Polymarket 200）
+    front_drop: float = 0.30              # 前墙单轮跌幅触发（薄簿噪声→取0.30）
+    same_drop: float = 0.30               # 同档单轮跌幅触发
+    front_hw_drop: float = 0.50           # 前墙高水位累计跌幅触发
+    same_hw_drop: float = 0.50            # 同档高水位累计跌幅触发
+    trend_window: int = 5                 # 趋势窗口轮数
+    trend_min_consecutive: int = 3        # 最少连续下降轮数
+    trend_cum_drop: float = 0.30          # 趋势累计跌幅触发
+    imbalance_levels: int = 5             # 偏斜取前 N 档
+    imbalance_min_total: float = 200.0    # 偏斜检测最低总深度 USDT（Polymarket 500）
+    imbalance_threshold: float = 0.25     # 买侧深度占比 <此 → 价或跌 → 买单危险
+    # 极端价更敏感
+    ext_front_drop: float = 0.20
+    ext_same_drop: float = 0.20
+    ext_front_hw_drop: float = 0.35
+    ext_same_hw_drop: float = 0.35
+    ext_same_safe: float = 120.0
+    ext_front_absolute: float = 50.0
+    ext_trend_cum_drop: float = 0.20
+    ext_imbalance_threshold: float = 0.30
 
 
 @dataclass
@@ -207,6 +243,7 @@ class BotConfig:
     predictfun_selection: PredictFunSelectionConfig = field(default_factory=PredictFunSelectionConfig)
     predictfun_place: PredictFunPlaceConfig = field(default_factory=PredictFunPlaceConfig)
     predictfun_monitor: PredictFunMonitorConfig = field(default_factory=PredictFunMonitorConfig)
+    predictfun_defense: PredictFunDefenseConfig = field(default_factory=PredictFunDefenseConfig)
 
 
 # 全局配置实例
