@@ -16,6 +16,13 @@ import sys
 import json
 import traceback
 
+# Windows 终端常为 GBK，强制 stdout/stderr 用 UTF-8，避免 ✓/✗/中文 打印崩溃
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from predictfun_data.predictfun_client import PredictFunClient
 
 

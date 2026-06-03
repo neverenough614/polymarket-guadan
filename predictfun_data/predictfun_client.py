@@ -82,7 +82,9 @@ class PredictFunClient:
         from eth_account.messages import encode_defunct
         acct = Account.from_key(os.environ["PREDICTFUN_PK"])
         signable = encode_defunct(text=message if isinstance(message, str) else str(message))
-        return acct.sign_message(signable).signature.hex()
+        sig = acct.sign_message(signable).signature.hex()
+        # 服务端验签要求 0x 前缀；hexbytes>=1 的 .hex() 不带前缀，这里兜底补上
+        return sig if sig.startswith("0x") else "0x" + sig
 
     # ---- 鉴权 ----
     def authenticate(self) -> None:
