@@ -475,3 +475,5 @@ cython_debug/
 
 # predict.fun 市场发现本地缓存(SP3)
 predictfun_strategy_tokens.json
+predictfun_normal_tokens.json
+predictfun_aggressive_tokens.json

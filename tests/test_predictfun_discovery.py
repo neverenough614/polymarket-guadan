@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from predictfun_data.market_discovery import (
     parse_iso, is_reward_active, reward_hourly_rate, market_to_row, select_reward_markets,
+    days_to_expiry,
 )
 
 NOW = datetime(2026, 6, 3, tzinfo=timezone.utc)
@@ -78,6 +79,19 @@ def test_market_to_row_none_when_missing_spread_threshold():
     m = _market(ACTIVE)
     m.pop("spreadThreshold")
     assert market_to_row(m) is None      # 缺奖励价带 → 跳过,不写裸挂单
+
+
+def test_days_to_expiry_future_positive_unknown_zero():
+    far = days_to_expiry("2026-07-03T13:00:00.000Z", NOW)   # 30 天后
+    assert 29 < far < 31
+    soon = days_to_expiry("2026-06-03T14:00:00.000Z", NOW)  # ~0.5h 后(NOW=06-03 00:00)
+    assert 0 < soon < 1
+    assert days_to_expiry(None, NOW) == 0.0                  # 未知 → 0
+
+
+def test_market_to_row_carries_reward_ends_at():
+    row = market_to_row(_market(ACTIVE))
+    assert row["reward_ends_at"] == ACTIVE["endsAt"]
 
 
 def test_market_to_row_maps_reward_fields():

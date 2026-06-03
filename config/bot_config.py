@@ -122,6 +122,37 @@ class PredictFunDiscoveryConfig:
 
 
 @dataclass
+class PredictFunSelectionConfig:
+    """predict.fun 选市/打分阈值（SP4）。
+
+    直接对齐 Polymarket update_markets.py 的 Normal LP / High Reward Aggressive 阈值，
+    使 predict.fun 选出的"会挂的市场"与 Polymarket 现网口径一致。
+    打分公式复用 Polymarket 原函数（predictfun_data.scoring）。
+
+    说明：days_to_expiry / volatility 两个 Polymarket 次级护栏在 predict.fun 无数据源
+    （API 不暴露到期时间与历史波动），故不参与过滤（等价于 Polymarket 的"未知到期→纳入"分支），
+    runner 会打印告警。核心目标函数（reward_per_100 效率 + 价差带 + 日奖励率）完整保留。
+    """
+    # Normal LP
+    normal_spread_min: float = 0.01
+    normal_spread_max: float = 0.04
+    normal_mid_reward_min: float = 0.5
+    normal_days_min: float = 7.0         # 到期护栏：奖励剩余 >7 天（或未知=0）才纳入
+    normal_sheet: str = "PF Normal LP"
+    # High Reward Aggressive
+    agg_daily_rate_min: float = 100.0
+    agg_reward_min: float = 2.0          # gm_reward_per_100 下限
+    agg_spread_min: float = 0.02
+    agg_spread_max: float = 0.12
+    agg_days_min: float = 3.0            # 到期护栏：奖励剩余 >3 天（或未知=0）才纳入
+    agg_sheet: str = "PF High Reward"
+    # 打分并发 & 上限
+    score_workers: int = 20
+    normal_json_path: str = "predictfun_normal_tokens.json"
+    aggressive_json_path: str = "predictfun_aggressive_tokens.json"
+
+
+@dataclass
 class BotConfig:
     """总配置，聚合各子配置"""
     sheet: SheetConfig = field(default_factory=SheetConfig)
@@ -131,6 +162,7 @@ class BotConfig:
     defense: DefenseConfig = field(default_factory=DefenseConfig)
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
     predictfun_discovery: PredictFunDiscoveryConfig = field(default_factory=PredictFunDiscoveryConfig)
+    predictfun_selection: PredictFunSelectionConfig = field(default_factory=PredictFunSelectionConfig)
 
 
 # 全局配置实例

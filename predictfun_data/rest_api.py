@@ -36,17 +36,23 @@ def _requests_transport(method, url, headers, json_body) -> HttpResp:
 
 
 class _RateLimiter:
-    """固定速率节流：保证请求间最小间隔 = 60/per_min 秒。"""
+    """固定速率节流：保证请求间最小间隔 = 60/per_min 秒。线程安全（并发打分会多线程取簿）。"""
     def __init__(self, per_min: int):
+        import threading
         self._min_interval = 60.0 / max(1, per_min)
         self._last = 0.0
+        self._lock = threading.Lock()
 
     def __call__(self) -> None:
-        now = time.monotonic()
-        wait = self._min_interval - (now - self._last)
+        # 持锁串行化"取下一发车时刻"，避免并发下 _last 竞态导致突破限速
+        with self._lock:
+            now = time.monotonic()
+            wait = self._min_interval - (now - self._last)
+            if wait < 0:
+                wait = 0.0
+            self._last = now + wait
         if wait > 0:
             time.sleep(wait)
-        self._last = time.monotonic()
 
 
 class PredictRest:

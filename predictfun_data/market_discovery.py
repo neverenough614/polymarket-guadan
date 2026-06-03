@@ -29,6 +29,18 @@ def reward_current(market: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return cur if isinstance(cur, dict) else None
 
 
+def days_to_expiry(reward_ends_at: Any, now: datetime) -> float:
+    """用 rewards.current.endsAt 作市场到期代理 → 剩余天数（已主网验证准确）。
+
+    返回 0.0 表示"未知到期"（无 endsAt / 解析失败），与 Polymarket days_to_expiry==0
+    语义一致（未知→纳入）。过期（end<now）返回负数（会被 >阈值 过滤掉）。
+    """
+    end = parse_iso(reward_ends_at)
+    if end is None:
+        return 0.0
+    return (end - now).total_seconds() / 86400.0
+
+
 def reward_hourly_rate(market: Dict[str, Any]) -> float:
     cur = reward_current(market)
     if not cur:
@@ -92,6 +104,7 @@ def market_to_row(market: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "max_spread": float(spread_threshold),  # spreadThreshold 已是小数
         "volatility_sum": 0.0,
         # 以下为 predict.fun 专属列（便于人工核对/排序，loader 不强依赖）
+        "reward_ends_at": (reward_current(market) or {}).get("endsAt"),  # 到期代理
         "hourly_rate": reward_hourly_rate(market),
         "market_id": market.get("id"),
         "fee_rate_bps": int(market.get("feeRateBps") or 0),
