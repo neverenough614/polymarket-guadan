@@ -191,7 +191,7 @@ async def _live(backend, tokens, limit):
         return
     mc = cfg.predictfun_monitor
     churn = ChurnGuard(mc.token_cooldown_sec, mc.max_cancels_per_hour)
-    print("\n=== 进入守护循环（盯订单簿变化防御 + auto_close；Ctrl+C 退出不自动撤单）===")
+    print("\n=== 进入守护循环（盯订单簿变化防御 + auto_close；Ctrl+C 退出会自动撤掉所有挂单清场）===")
     await monitor_loop(backend, target, churn)
 
 
@@ -223,7 +223,12 @@ def main() -> int:
         try:
             asyncio.run(_live(backend, tokens, limit))
         except KeyboardInterrupt:
-            print("\n[runner] 收到中断,退出守护循环。挂单仍在（如需清场跑 `cancel`）。")
+            print("\n[runner] 收到中断,正在撤掉本账户所有挂单（清场）...")
+            try:
+                res = backend.cancel_all()
+                print(f"[runner] ✅ 已撤所有挂单：{res}")
+            except Exception as e:
+                print(f"[runner] ⚠️ 退出撤单失败，请手动跑 `cancel`：{e}")
         return 0
 
     print(f"未知模式 {mode}（plan|live|once|cancel）"); return 1
