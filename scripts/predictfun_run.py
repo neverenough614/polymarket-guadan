@@ -11,6 +11,7 @@
   python scripts/predictfun_run.py live  --limit 1     # 实盘：挂单+守护（--limit 覆盖默认；省略=用默认）
   python scripts/predictfun_run.py once  --limit 1     # 实盘：只挂一轮,不进守护循环(便于验证)
   python scripts/predictfun_run.py cancel              # 安全：撤掉本账户所有挂单
+  python scripts/predictfun_run.py close               # 一键清仓：merge/卖出所有被吃出来的持仓(不挂新单)
 
 前置 .env：PLATFORM=predictfun / PREDICTFUN_NETWORK=mainnet / PREDICTFUN_PK / PREDICTFUN_API_KEY
         / PREDICTFUN_ACCOUNT / SPREADSHEET_URL(+credentials.json)。
@@ -41,7 +42,7 @@ SAFETY = 0.95   # 预算缓冲：累计预扣 ≤ 余额×此值（防边界 + �
 
 # ⚙️ 默认挂几个市场（不带 --limit 时用这个）。想改挂单市场数直接改这里；
 #    命令行 --limit N 仍会临时覆盖它。设 0 = 不限（按预算挂满，慎用）。
-DEFAULT_MARKET_LIMIT = 3
+DEFAULT_MARKET_LIMIT = 6
 
 
 def _parse_args(argv):
@@ -266,6 +267,16 @@ def main() -> int:
         print(f"[cancel] 已撤所有挂单：{res}")
         return 0
 
+    if mode == "close":
+        # 一键清仓：merge 完整套 / 走簿卖出单边残仓（不挂新单）。用于清掉被吃出来的卡住持仓。
+        from predictfun_data.auto_close import run_auto_close
+        backend = create_execution_backend("predictfun")
+        print("[close] 注册市场(取 meta/簿)...")
+        backend.refresh_markets(status="OPEN")
+        res = run_auto_close(backend)
+        print(f"[close] merge {res['merged']} / sell {res['sold']}（清仓动作 {len(res.get('actions', []))} 个）")
+        return 0
+
     backend, tokens = _setup()
 
     if not tokens:
@@ -288,7 +299,7 @@ def main() -> int:
                 print(f"[runner] ⚠️ 退出撤单失败，请手动跑 `cancel`：{e}")
         return 0
 
-    print(f"未知模式 {mode}（plan|live|once|cancel）"); return 1
+    print(f"未知模式 {mode}（plan|live|once|cancel|close）"); return 1
 
 
 if __name__ == "__main__":

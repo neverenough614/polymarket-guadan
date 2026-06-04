@@ -137,10 +137,20 @@ def decide_close_actions(
     return actions
 
 
-# ---------- 持仓解析（防御：字段名/单位以首次真实成交为准）----------
+# ---------- 持仓解析（字段名/单位已用主网首次真实成交校验）----------
+# 实测 /v1/positions 单条结构：{amount:wei字符串, outcome:{onChainId,name,...}, market:{conditionId,...},
+#   id:base64游标(非token!), averageBuyPriceUsd, pnlUsd, valueUsd}。token id 在嵌套 outcome.onChainId。
 def _pos_token_id(p: Dict[str, Any]) -> str:
-    return str(p.get("token_id") or p.get("asset") or p.get("asset_id")
-              or p.get("tokenId") or p.get("outcomeId") or p.get("onChainId") or "")
+    direct = (p.get("token_id") or p.get("asset") or p.get("asset_id")
+              or p.get("tokenId") or p.get("outcomeId") or p.get("onChainId"))
+    if direct:
+        return str(direct)
+    out = p.get("outcome")            # 主网实测：token id 嵌在 outcome.onChainId（顶层 id 是游标，勿用）
+    if isinstance(out, dict):
+        oid = out.get("onChainId") or out.get("tokenId") or out.get("outcomeId") or out.get("id")
+        if oid:
+            return str(oid)
+    return ""
 
 
 def _pos_size(p: Dict[str, Any]) -> float:

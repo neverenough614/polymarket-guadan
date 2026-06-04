@@ -146,6 +146,19 @@ def test_positions_parse_shares_and_wei():
     assert "" not in m
 
 
+def test_positions_parse_real_predictfun_shape():
+    # 主网实测结构：token id 嵌在 outcome.onChainId，份额在 amount(wei)，顶层 id 是 base64 游标(非token)
+    rows = [{
+        "amount": "5000000000000000000",                    # 5 份(wei)
+        "averageBuyPriceUsd": "0.524",
+        "id": "eyJtYXJrZXRJZCI6MTUyNTF9",                   # base64 游标，不能当 token id
+        "outcome": {"onChainId": "9243252904", "name": "No"},
+        "market": {"conditionId": "0x5b7f"},
+    }]
+    m = positions_to_map(rows, min_close=5)
+    assert m == {"9243252904": 5.0}                          # 取 outcome.onChainId、amount→5 份
+
+
 # ---------- run_auto_close：清仓锁（返回本轮在清仓的 token，含被撤的对手腿）----------
 class _RunMeta:
     def __init__(self, cond, comp):
