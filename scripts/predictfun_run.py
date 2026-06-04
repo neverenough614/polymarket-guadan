@@ -41,11 +41,19 @@ SAFETY = 0.95   # 预算缓冲：累计预扣 ≤ 余额×此值（防边界 + �
 def _parse_args(argv):
     mode = argv[1] if len(argv) > 1 else "plan"
     limit = None
-    if "--limit" in argv:
-        try:
-            limit = int(argv[argv.index("--limit") + 1])
-        except (ValueError, IndexError):
-            limit = None
+    for i, a in enumerate(argv):
+        if a == "--limit" and i + 1 < len(argv):          # --limit 2
+            try:
+                limit = int(argv[i + 1])
+            except ValueError:
+                pass
+        elif a.startswith("--limit="):                     # --limit=2
+            try:
+                limit = int(a.split("=", 1)[1])
+            except ValueError:
+                pass
+        elif a.startswith("--limit") and a[len("--limit"):].isdigit():  # --limit2（粘连）
+            limit = int(a[len("--limit"):])
     return mode, limit
 
 
