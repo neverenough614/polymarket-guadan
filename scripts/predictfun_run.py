@@ -4,16 +4,18 @@
   factory 建 PredictFunClient+Backend → 注册市场(分页) → strategy_loader 载选市结果
   → place_orders 初挂真实双边(奖励价带内) → monitor_loop 保守守护(churn 双闸防清零)
 
+挂几个市场：默认取文件顶部常量 DEFAULT_MARKET_LIMIT（改那里即可）；命令行 --limit N 覆盖。
+
 模式（Windows PowerShell）：
-  python scripts/predictfun_run.py plan  --limit 5     # 只读：打印要挂的市场与价格,不下单
-  python scripts/predictfun_run.py live  --limit 1     # 实盘：挂单+守护(限 N 个市场,控制敞口)
+  python scripts/predictfun_run.py plan                # 只读：按默认市场数打印要挂的市场+价格+效率,不下单
+  python scripts/predictfun_run.py live  --limit 1     # 实盘：挂单+守护（--limit 覆盖默认；省略=用默认）
   python scripts/predictfun_run.py once  --limit 1     # 实盘：只挂一轮,不进守护循环(便于验证)
   python scripts/predictfun_run.py cancel              # 安全：撤掉本账户所有挂单
 
 前置 .env：PLATFORM=predictfun / PREDICTFUN_NETWORK=mainnet / PREDICTFUN_PK / PREDICTFUN_API_KEY
         / PREDICTFUN_ACCOUNT / SPREADSHEET_URL(+credentials.json)。
 
-⚠️ 实盘安全：live/once 会下真实单,务必用 --limit 控制市场数。资金不足时多数单会被拒。
+⚠️ 实盘安全：live/once 会下真实单。市场数由 DEFAULT_MARKET_LIMIT（或 --limit）控制；设 0=不限(慎用)。
 """
 import os
 import sys
@@ -36,6 +38,10 @@ from predictfun_data.heat import tracker as heat_tracker
 from orderbook.analyzer import get_orderbook_info
 
 SAFETY = 0.95   # 预算缓冲：累计预扣 ≤ 余额×此值（防边界 + 留 gas/滑点余量）
+
+# ⚙️ 默认挂几个市场（不带 --limit 时用这个）。想改挂单市场数直接改这里；
+#    命令行 --limit N 仍会临时覆盖它。设 0 = 不限（按预算挂满，慎用）。
+DEFAULT_MARKET_LIMIT = 3
 
 
 def _parse_args(argv):
@@ -205,7 +211,10 @@ async def _live(backend, tokens, limit):
 
 def main() -> int:
     mode, limit = _parse_args(sys.argv)
-    print(f"=== predict.fun runner 模式={mode} limit={limit} ===")
+    if limit is None:
+        limit = DEFAULT_MARKET_LIMIT          # 不带 --limit → 用文件内默认；--limit N 覆盖
+    src = "命令行" if "--limit" in " ".join(sys.argv) else f"默认 DEFAULT_MARKET_LIMIT"
+    print(f"=== predict.fun runner 模式={mode} 挂单市场数={limit}（{src}；0=不限）===")
 
     if mode == "cancel":
         backend = create_execution_backend("predictfun")
@@ -217,10 +226,6 @@ def main() -> int:
 
     if not tokens:
         print("✗ 无策略 token（先跑 scripts/predictfun_update_markets.py discover 生成 PF 标签页/JSON）")
-        return 1
-
-    if mode in ("live", "once") and limit is None:
-        print("✗ 实盘必须带 --limit N 控制市场数（防敞口失控）。例：once --limit 3")
         return 1
 
     if mode == "plan":
