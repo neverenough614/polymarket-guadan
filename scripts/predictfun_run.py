@@ -196,6 +196,48 @@ def _place_once(backend, tokens, limit):
     return target_tokens
 
 
+def _make_backfill(backend, all_tokens):
+    """造补位函数 backfill(exclude_market_keys, n_needed)->新挂的 token 列表。
+
+    从全部候选里排除：已在挂(exclude)、热度冻结、奖励失效的市场；再按效率降序、
+    受剩余预算约束，选 n_needed 个最优市场挂上。供 monitor_loop 自动轮换补位调用。
+    """
+    from datetime import datetime, timezone
+    from predictfun_data.monitor import reward_active
+
+    def backfill(exclude_market_keys, n_needed):
+        if not n_needed or n_needed <= 0:
+            return []
+        now_dt = datetime.now(timezone.utc)
+
+        def candidate_ok(toks):
+            if any(heat_tracker.is_frozen(str(t["token_id"])) for t in toks):
+                return False
+            if any(not reward_active(t.get("reward_ends_at"), now_dt) for t in toks):
+                return False
+            return True
+
+        markets = [(k, toks) for k, toks in _group_markets(backend, all_tokens)
+                   if k not in exclude_market_keys and candidate_ok(toks)]
+        if not markets:
+            return []
+        total_bal = backend.raw_client.get_usdt_balance()
+        available = available_after_open_buys(total_bal, backend.get_all_orders())
+        selected, _skip, _total, _dropped = build_plan(
+            markets, _quote_fn(backend), _min_size, available, safety=SAFETY, max_markets=n_needed,
+        )
+        placed = []
+        for _key, legs, _eff in selected:
+            for t, price, size in legs:
+                res = place_leg(backend, t, price, size)
+                if res.get("status") == "placed":
+                    placed.append(t)
+                    print(f"  ♻️➕ 补挂 {str(t['question'])[:28]} [{t.get('token_type')}] BUY@{price:.3f}×{size:.0f}")
+        return placed
+
+    return backfill
+
+
 async def _live(backend, tokens, limit):
     # _place_once 内有同步 SDK 调用(get_usdt_balance/签名)，必须在工作线程跑，
     # 否则 predict-sdk 会拒绝"async 上下文里调同步方法"。
@@ -205,8 +247,10 @@ async def _live(backend, tokens, limit):
         return
     mc = cfg.predictfun_monitor
     churn = ChurnGuard(mc.token_cooldown_sec, mc.max_cancels_per_hour)
-    print("\n=== 进入守护循环（盯订单簿变化防御 + auto_close；Ctrl+C 退出会自动撤掉所有挂单清场）===")
-    await monitor_loop(backend, target, churn)
+    target_count = limit if (limit and limit > 0) else None   # 0/不限 → 不做轮换补位
+    backfill_fn = _make_backfill(backend, tokens) if target_count else None
+    print("\n=== 进入守护循环（盯订单簿变化防御 + auto_close + 自动轮换补位；Ctrl+C 退出自动撤光清场）===")
+    await monitor_loop(backend, target, churn, target_count=target_count, backfill_fn=backfill_fn)
 
 
 def main() -> int:

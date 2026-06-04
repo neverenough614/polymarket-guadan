@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import execution.predictfun_monitor_loop as mloop
 from predictfun_data.churn_guard import ChurnGuard
-from predictfun_data.monitor import decide_action, reward_active, NONE, REFILL, RECENTER
+from predictfun_data.monitor import decide_action, reward_active, backfill_need, NONE, REFILL, RECENTER
 from predictfun_data.normalize import NormalizedBook, BookLevel
 from predictfun_data.defense import DefenseState
 
@@ -214,3 +214,24 @@ def test_reward_active_future_runs_normally():
     fut = {**TOKEN, "reward_ends_at": "2099-01-01T00:00:00Z"}
     res = mloop.evaluate_and_execute(be, fut, my_bid=0.49, churn=g, now=1.0)
     assert res["action"] == NONE                        # 奖励有效 + 在带内 → 正常不动
+
+
+# ---------- backfill_need 自动轮换补位判定 ----------
+def test_backfill_all_alive_needs_none():
+    dead, n = backfill_need({"A": False, "B": False, "C": False}, target=3)
+    assert dead == [] and n == 0
+
+
+def test_backfill_one_dead_needs_one():
+    dead, n = backfill_need({"A": False, "B": True, "C": False}, target=3)
+    assert dead == ["B"] and n == 1                      # B 死(冻结/失效)→腾位→补 1
+
+
+def test_backfill_counts_only_alive_slots():
+    dead, n = backfill_need({"A": True, "B": True}, target=3)
+    assert set(dead) == {"A", "B"} and n == 3            # 全死→占用0→补满3
+
+
+def test_backfill_disabled_when_target_zero():
+    dead, n = backfill_need({"A": False}, target=0)
+    assert n == 0                                        # target=0(不限)→不补

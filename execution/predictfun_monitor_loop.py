@@ -10,12 +10,13 @@ evaluate_and_execute 为同步、可注入 fake backend 的单 token 处理单�
 monitor_loop 仅做轮询调度。Polymarket 路径不受影响。
 """
 import asyncio
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from config.bot_config import cfg
 from orderbook.analyzer import get_orderbook_info
-from predictfun_data.monitor import decide_action, reward_active, NONE
+from predictfun_data.monitor import decide_action, reward_active, backfill_need, NONE
 from predictfun_data.churn_guard import ChurnGuard
 from predictfun_data.placer import place_bid
 from predictfun_data.auto_close import run_auto_close
@@ -136,8 +137,14 @@ async def monitor_loop(
     churn: Optional[ChurnGuard] = None,
     now_fn: Optional[Callable[[], float]] = None,
     stop_event: Optional[asyncio.Event] = None,
+    target_count: Optional[int] = None,
+    backfill_fn: Optional[Callable[[set, int], List[Dict[str, Any]]]] = None,
 ) -> None:
-    """温和轮询监控循环。strategy_tokens 由 predict.fun strategy_loader 提供。"""
+    """温和轮询监控循环。strategy_tokens 由 predict.fun strategy_loader 提供。
+
+    target_count + backfill_fn 同时给定时启用**自动轮换补位**：市场因冻结/奖励失效掉出后，
+    从候选里补效率最高的新市场，维持 target_count 个在挂（受预算 + churn + 补位冷却约束）。
+    """
     import time
     mcfg = cfg.predictfun_monitor
     churn = churn or ChurnGuard(mcfg.token_cooldown_sec, mcfg.max_cancels_per_hour)
@@ -145,6 +152,7 @@ async def monitor_loop(
     by_id = {str(t["token_id"]): t for t in strategy_tokens}
     defense_states: Dict[str, DefenseState] = {tid: DefenseState() for tid in by_id}
     close_attempts: Dict[str, int] = {}      # token_id → 连续未成交清仓轮数（卖价逐轮升级保成交）
+    last_backfill = 0.0                       # 上次补位时间戳（受 backfill_cooldown_sec 约束）
     print(f"🛡️ [predict.fun 监控] 启动：{len(by_id)} 个 token，轮询 {mcfg.poll_interval_sec}s，"
           f"冷却 {mcfg.token_cooldown_sec}s，撤单预算 {mcfg.max_cancels_per_hour}/h，"
           f"防御={'开' if mcfg.enable_defense else '仅告警'}（盯订单簿变化）")
@@ -195,6 +203,43 @@ async def monitor_loop(
                     print(f"   🛡️ [{act}] {str(token_info.get('question'))[:36]} → {res.get('reason')}")
             if acted or defended:
                 print(f"🛡️ [predict.fun 监控] 维护 {acted} / 防御 {defended}（撤单预算余 {churn.remaining_budget(now_fn())}/h）")
+
+            # ── 自动轮换补位：死市场(冻结/奖励失效)移出 → 用候选补满目标市场数 ──
+            if target_count and backfill_fn:
+                now_dt = datetime.now(timezone.utc)
+                mkt_tokens: Dict[Any, List[str]] = defaultdict(list)
+                for t_id in by_id:
+                    meta = backend.meta_for(t_id)
+                    mk = meta.market_id if meta is not None else ("u", t_id)
+                    mkt_tokens[mk].append(t_id)
+                market_dead = {}
+                for mk, tids in mkt_tokens.items():
+                    expired = any(not reward_active(by_id[x].get("reward_ends_at"), now_dt) for x in tids)
+                    all_frozen = bool(tids) and all(heat_tracker.is_frozen(x) for x in tids)
+                    market_dead[mk] = expired or all_frozen
+                dead_keys, n_needed = backfill_need(market_dead, target_count)
+                for mk in dead_keys:                      # 移出死市场（auto_close 全局清仓不受影响）
+                    for x in mkt_tokens[mk]:
+                        by_id.pop(x, None); defense_states.pop(x, None)
+                        try:
+                            await asyncio.to_thread(backend.cancel_all_asset, x)
+                        except Exception:
+                            pass
+                    print(f"   ♻️ [轮换] 移出市场 {mk}（冻结/奖励失效），腾出名额")
+                if n_needed > 0 and (now_fn() - last_backfill) >= mcfg.backfill_cooldown_sec:
+                    exclude = {mk for mk in mkt_tokens if mk not in dead_keys}   # 现有活市场不重复补
+                    try:
+                        new_tokens = await asyncio.to_thread(backfill_fn, exclude, n_needed)
+                    except Exception as e:
+                        new_tokens = []
+                        print(f"⚠️ [轮换] 补位失败：{e}")
+                    for t in new_tokens or []:
+                        ntid = str(t["token_id"])
+                        by_id[ntid] = t
+                        defense_states[ntid] = DefenseState()
+                    if new_tokens:
+                        print(f"   ♻️ [轮换] 补挂 {len(new_tokens)} 腿（目标 {target_count} 市场）")
+                    last_backfill = now_fn()
         except Exception as e:
             print(f"❌ [predict.fun 监控] 轮询出错：{e}")
             import traceback

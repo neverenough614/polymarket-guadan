@@ -8,13 +8,26 @@ YES+NO 两个 token 各一张买单即构成共享簿上的双边。故监控是
 """
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .market_discovery import parse_iso
 
 NONE = "NONE"
 REFILL = "REFILL"
 RECENTER = "RECENTER"
+
+
+def backfill_need(market_dead: Dict[Any, bool], target: int) -> Tuple[List[Any], int]:
+    """自动轮换补位判定（纯函数）。
+
+    market_dead: 当前监控的 market_key → 是否已死（冻结/奖励失效，应移出监控腾出名额）。
+    返回 (要移出的死市场列表, 需补挂的新市场数)。
+    需补数 = 目标 − 仍活着的市场数（死市场不占名额；target≤0 时不补）。
+    """
+    dead = [k for k, is_dead in market_dead.items() if is_dead]
+    occupied = sum(1 for is_dead in market_dead.values() if not is_dead)
+    n_needed = max(0, target - occupied) if target and target > 0 else 0
+    return dead, n_needed
 
 
 def reward_active(reward_ends_at: Any, now_dt: datetime) -> bool:
