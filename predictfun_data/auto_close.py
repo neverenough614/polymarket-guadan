@@ -60,7 +60,7 @@ def absorbing_sell_price(
             break
         cum += sz
         if cum >= size:                       # 这一档（及以上）累计能吃下全部 size
-            return max(tick, price - base_offset), True
+            return max(floor, price - base_offset), True   # 让价不穿 max_drop 地板（升级时也受此约束）
     return floor, False                        # max_drop 内吃不下 → 地板价尽力卖
 
 
@@ -73,11 +73,15 @@ def decide_close_actions(
     sell_offset: float,
     max_drop: float = 0.10,
     tick: float = 0.01,
+    attempts_of: Optional[Callable[[str], int]] = None,
+    escalate_step: float = 0.0,
 ) -> List[CloseAction]:
     """positions: token_id→持仓份额。返回清仓动作列表（先 merge 完整套，再卖残余单边）。
 
     按 condition_id 归集二元市场两腿；每个市场只处理一次。merge 量=min(两腿)，
     残余单边走簿求承接卖价（absorbing_sell_price）。无 meta / 无买档的单边持仓跳过（不冒进）。
+    attempts_of(token_id)：该仓连续未成交轮数 → 让价升级 sell_offset + n×escalate_step
+    （封顶 max_drop），保证被吃后的止损单逐轮更激进、最终成交。
     """
     actions: List[CloseAction] = []
     consumed: Dict[str, float] = {}     # token_id → 已被 merge 消耗的份额
@@ -116,11 +120,14 @@ def decide_close_actions(
         bids = bids_of(token_id)
         if not bids:
             continue                     # 无买档不冒进卖出
-        price, sufficient = absorbing_sell_price(bids, residual, sell_offset, max_drop, tick)
+        n = attempts_of(token_id) if attempts_of else 0
+        eff_offset = min(sell_offset + n * escalate_step, max_drop)   # 连续未成交→逐轮更激进（封顶 max_drop）
+        price, sufficient = absorbing_sell_price(bids, residual, eff_offset, max_drop, tick)
         if price is None:
             continue
         price = units.price_to_tick(price, tick)
-        note = "ok" if sufficient else f"承接不足(最多让{max_drop})尽力卖"
+        esc = f"·第{n+1}轮让{eff_offset:.2f}" if n else ""
+        note = ("ok" if sufficient else f"承接不足(最多让{max_drop})尽力卖") + esc
         actions.append(CloseAction(
             kind=SELL, token_id=token_id, price=price, size=residual,
             neg_risk=bool(getattr(meta, "neg_risk", False)) if meta else False,
@@ -168,8 +175,11 @@ def positions_to_map(rows: List[Dict[str, Any]], min_close: float = 0.0) -> Dict
     return out
 
 
-def run_auto_close(backend: Any, mc=None) -> Dict[str, Any]:
-    """拉持仓→决定动作→撤相关买单→执行 merge/sell。返回执行摘要。"""
+def run_auto_close(backend: Any, mc=None, attempts_of: Optional[Callable[[str], int]] = None) -> Dict[str, Any]:
+    """拉持仓→决定动作→撤相关买单→执行 merge/sell。返回执行摘要。
+
+    attempts_of(token_id)：该仓连续未成交轮数（由监控循环维护），用于卖价逐轮升级保成交。
+    """
     mc = mc or cfg.predictfun_monitor
     client = backend.raw_client
     rows = backend.get_all_positions()
@@ -178,7 +188,7 @@ def run_auto_close(backend: Any, mc=None) -> Dict[str, Any]:
         rows = rows.to_dict("records")
     positions = positions_to_map(rows, min_close=0.0)
     if not positions:
-        return {"merged": 0, "sold": 0, "actions": []}
+        return {"merged": 0, "sold": 0, "actions": [], "closed_tokens": []}
 
     def bids_of(tid: str) -> List[Any]:
         try:
@@ -191,8 +201,10 @@ def run_auto_close(backend: Any, mc=None) -> Dict[str, Any]:
     actions = decide_close_actions(
         positions, backend.meta_for, bids_of,
         min_close=mc.close_min_position, sell_offset=mc.close_offset, max_drop=mc.close_max_drop,
+        attempts_of=attempts_of, escalate_step=getattr(mc, "close_escalate_step", 0.0),
     )
     merged = sold = 0
+    closed_tokens: set = set()      # 本轮在清仓的 token（含被撤买单的对手腿）→ 监控本轮跳过，防边清边买
     for a in actions:
         try:
             if a.kind == MERGE:
@@ -204,15 +216,17 @@ def run_auto_close(backend: Any, mc=None) -> Dict[str, Any]:
                 print(f"   🧬 [merge] cond={str(a.condition_id)[:12]} ×{a.amount_shares:.0f} → USDT")
             elif a.kind == SELL:
                 backend.cancel_all_asset(a.token_id)   # 撤掉该 token 买单，防边清边买
+                closed_tokens.add(str(a.token_id))
                 # 同时撤对手腿买单：否则卖掉残余后对手买单成交→重新累积单边持仓
                 meta = backend.meta_for(a.token_id)
                 comp = getattr(meta, "complement_token_id", None) if meta else None
                 if comp:
                     backend.cancel_all_asset(comp)
+                    closed_tokens.add(str(comp))
                 backend.create_order(a.token_id, "SELL", a.price, a.size, neg_risk=a.neg_risk)
                 sold += 1
                 warn = "" if a.depth_sufficient else " ⚠️承接不足"
                 print(f"   💰 [sell] {str(a.token_id)[:12]} ×{a.size:.0f}@{a.price:.3f}{warn}")
         except Exception as e:
             print(f"   ⚠️ [auto_close] {a.kind} 失败: {str(e)[:80]}")
-    return {"merged": merged, "sold": sold, "actions": actions}
+    return {"merged": merged, "sold": sold, "actions": actions, "closed_tokens": list(closed_tokens)}

@@ -167,8 +167,8 @@ class PredictFunPlaceConfig:
       - 不移植"奖励效率闸≥0.2"——predict.fun reward_per_100 高达 300+（PP），恒过=空操作。
       - 动态量在薄市场落到 floor=min_size(=shareThreshold)，即"缩量"，而非 Polymarket 的"<min 就跳过"。
     """
-    min_level_depth: float = 15.0        # 单档灰尘过滤（USDT）：低于此视为无效档，跳到下一档
-    min_top5_depth: float = 150.0        # 前5档累计 sanity 下限（USDT）：低于此整个市场跳过
+    min_level_depth: float = 40.0        # 单档灰尘过滤（USDT）：低于此视为无效档，跳到下一档（中等校准：真实档1中位240）
+    min_top5_depth: float = 500.0        # 前5档累计 sanity 下限（USDT）：低于此整个市场跳过（中等校准：真实前5档 p25 633）
     price_min: float = 0.15              # 价带下沿：mid<此 视为极端价(接近0)→不报价（避开事件跳变被吃）
     price_max: float = 0.85              # 价带上沿：mid>此 视为极端价(接近1)→不报价
     allow_single_sided: bool = True       # 允许单向挂(仅一腿可报价时)：非极端+出场深度足已由 compute_quote 保证
@@ -176,7 +176,7 @@ class PredictFunPlaceConfig:
     max_order_size: float = 500.0        # （保留，当前不用；尺寸固定 min_size）
     require_exit_liquidity: bool = True   # 薄簿风控核心：买入成交后须能卖回更低 bid 平仓
     exit_max_gap: float = 0.05           # 出场：最近更低 bid 距我买价的最大间距
-    exit_depth_multiplier: float = 1.0   # 出场：更低档累计深度须 ≥ 我 notional × 此值
+    exit_depth_multiplier: float = 1.5   # 出场：更低档累计深度须 ≥ 我 notional × 此值（中等校准：留缓冲，被吃后能卖回）
     min_q_score_ratio: float = 0.04      # Q-score 下限 ((v-s)/v)^2（监控判无效单用）
     extreme_price_threshold: float = 0.10  # 极端价（≤0.10 或 ≥0.90）→ 要求该市场双侧都可报价
 
@@ -201,6 +201,7 @@ class PredictFunMonitorConfig:
     close_min_position: float = 5.0      # 最小清仓持仓（份）
     close_offset: float = 0.01           # 基础让价（卖价在承接档基础上再降，确保成交）
     close_max_drop: float = 0.10         # 最大让价：簿在此范围内吃不下→尽力卖并告警（防卖到地板）
+    close_escalate_step: float = 0.01    # 同一仓连续未成交→每轮在让价上再加此值（到 max_drop 封顶，保成交止损）
 
 
 @dataclass
@@ -211,9 +212,10 @@ class PredictFunDefenseConfig:
     （前墙/同档 USDT）按 predict.fun 真实薄簿大幅下调——实测 top40：前墙中位411/p25 52、
     同档中位286/p25 104。薄簿噪声大，单轮/同档跌幅阈值取偏大值以免误撤（撤多了触发反作弊）。
     """
-    # 只盯"变化"，不盯"静态薄度"：predict.fun 簿本来就薄 + 极端价天然偏斜，静态门槛会一上来全触发。
-    use_absolute_floors: bool = False     # 静态"前墙/同档太薄"绝对兜底（predict.fun 默认关）
-    use_imbalance: bool = False           # 买卖偏斜（极端价市场天然偏斜→默认关）
+    # 静态门槛 + 偏斜：极端价市场已被 placer 价带(0.15~0.85)排除，故偏斜不再被天然偏斜误触发，
+    # 二者打开做"被一单吃光"的兜底（中等校准，配合下方 same_safe/front/imbalance_min_total）。
+    use_absolute_floors: bool = True      # 静态"前墙/同档太薄"绝对兜底（防孤挂被一单吃）
+    use_imbalance: bool = True            # 买卖偏斜（买侧深度占比过低→价或跌→撤买单）
     change_min_depth: float = 15.0        # 变化检测"曾有意义"门槛 USDT（替代 same_safe 作相对跌幅闸）
     extreme_threshold: float = 0.10       # 极端价（≤0.10 或 ≥0.90）用更敏感参数
     front_present: float = 50.0           # 前墙"存在"判定门槛 USDT（Polymarket 100）
@@ -228,7 +230,7 @@ class PredictFunDefenseConfig:
     trend_min_consecutive: int = 3        # 最少连续下降轮数
     trend_cum_drop: float = 0.30          # 趋势累计跌幅触发
     imbalance_levels: int = 5             # 偏斜取前 N 档
-    imbalance_min_total: float = 200.0    # 偏斜检测最低总深度 USDT（Polymarket 500）
+    imbalance_min_total: float = 400.0    # 偏斜检测最低总深度 USDT（中等校准：真实前5档双侧总深中位 ~3000，滤掉极小盘免误触发）
     imbalance_threshold: float = 0.25     # 买侧深度占比 <此 → 价或跌 → 买单危险
     # 极端价更敏感
     ext_front_drop: float = 0.20

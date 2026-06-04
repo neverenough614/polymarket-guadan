@@ -3,7 +3,7 @@
 双边靠"买 YES + 买 NO"(买 NO=卖 YES)实现,故每个 token 只算/挂一张买单。
 """
 from predictfun_data.placer import (
-    select_join_price, exit_liquidity_ok, compute_quote, place_bid,
+    select_join_price, exit_liquidity_ok, compute_quote, place_bid, order_efficiency,
 )
 from predictfun_data.normalize import NormalizedBook, BookLevel
 from config.bot_config import PredictFunPlaceConfig
@@ -131,3 +131,27 @@ def test_place_bid_no_quote_when_one_sided():
     be = FakeBackend()
     res = place_bid(be, TOKEN, _book([(0.49, 2000)], []))
     assert res["status"] == "no_quote" and be.created == []
+
+
+# ---------- order_efficiency：单张买单预期日奖励（复用 Polymarket 公式，零漂移）----------
+def test_efficiency_positive_in_band():
+    # 簿内 1000 share 竞争，我 100 share 同价 0.49；mid 0.50，max_spread 0.06，日奖励率 2400
+    # q=((0.06-0.01)/0.06)²=0.6944；share=69.44/763.89=0.0909；日奖励=2400×0.5×0.0909≈109.09
+    eff = order_efficiency([(0.49, 1000)], price=0.49, size=100, mid=0.50,
+                           max_spread=0.06, daily_rate=2400.0)
+    assert abs(eff["expected_daily_reward"] - 109.09) < 0.5
+    assert eff["expected_reward_per_100"] > 0
+
+
+def test_efficiency_zero_out_of_band():
+    # 挂价 0.43 距 mid 0.07 > max_spread 0.06 → q=0 → 拿不到奖励
+    eff = order_efficiency([(0.49, 1000)], price=0.43, size=100, mid=0.50,
+                           max_spread=0.06, daily_rate=2400.0)
+    assert eff["expected_daily_reward"] == 0.0
+
+
+def test_efficiency_thin_competition_beats_crowded():
+    # 同样日奖励率，竞争薄的市场份额大 → 效率高（"挂薄市场拿高奖励"）
+    thin = order_efficiency([(0.49, 100)], 0.49, 100, 0.50, 0.06, 2400.0)
+    crowded = order_efficiency([(0.49, 5000)], 0.49, 100, 0.50, 0.06, 2400.0)
+    assert thin["expected_daily_reward"] > crowded["expected_daily_reward"]

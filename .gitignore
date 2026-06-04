@@ -477,3 +477,7 @@ cython_debug/
 predictfun_strategy_tokens.json
 predictfun_normal_tokens.json
 predictfun_aggressive_tokens.json
+
+# predict.fun 运行时热度状态（不入库）
+predictfun_heat_state.json
+predictfun_heat_state.json.*.tmp

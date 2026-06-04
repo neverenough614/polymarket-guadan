@@ -133,3 +133,32 @@ def test_build_plan_pairs_then_budgets():
     assert len(selected) == 2                       # m1 完整套 + m2 单向
     assert len(selected[0][1]) == 2 and len(selected[1][1]) == 1
     assert skip_reasons.get("budget_exhausted") == 1   # m3
+
+
+# ---------- build_plan：按挂单效率(quote 第5位 eff)降序选市 ----------
+def _q(t, price, eff):
+    return (t, price, 100.0, "ok", eff)
+
+
+def test_build_plan_ranks_by_efficiency_not_input_order():
+    # A 在前但效率低(每腿5)，B 在后但效率高(每腿50) → 选中顺序应 B 在前
+    A = ("A", [_tok("YES"), _tok("NO")])
+    B = ("B", [_tok("YES"), _tok("NO")])
+    eff = {id(A[1][0]): 5.0, id(A[1][1]): 5.0, id(B[1][0]): 50.0, id(B[1][1]): 50.0}
+    quote_fn = lambda t: _q(t, 0.10, eff[id(t)])
+    selected, _sk, _total, _dropped = build_plan(
+        [A, B], quote_fn, lambda toks: 100.0, available=1000.0, safety=0.95,
+    )
+    assert [k for k, _legs, _e in selected] == ["B", "A"]   # 高效率优先
+    assert selected[0][2] == 100.0 and selected[1][2] == 10.0  # 两腿效率合计
+
+
+def test_build_plan_max_markets_keeps_top_efficiency():
+    A = ("A", [_tok("YES"), _tok("NO")])
+    B = ("B", [_tok("YES"), _tok("NO")])
+    eff = {id(A[1][0]): 5.0, id(A[1][1]): 5.0, id(B[1][0]): 50.0, id(B[1][1]): 50.0}
+    quote_fn = lambda t: _q(t, 0.10, eff[id(t)])
+    selected, _sk, _total, _dropped = build_plan(
+        [A, B], quote_fn, lambda toks: 100.0, available=1000.0, safety=0.95, max_markets=1,
+    )
+    assert len(selected) == 1 and selected[0][0] == "B"     # 只留效率最高的

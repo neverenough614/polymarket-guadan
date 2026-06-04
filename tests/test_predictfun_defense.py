@@ -109,28 +109,27 @@ def test_evaluate_triggers_on_front_wall_collapse_second_round():
     assert fired and reasons
 
 
-def test_static_thinness_and_imbalance_do_not_trigger_by_default():
-    # predict.fun 关键校准：簿本来就薄($21 同档)+ 极端价天然偏斜，但"无变化"→不该撤单
+def test_stable_healthy_book_no_trigger():
+    # 健康非极端簿：前墙厚、同档够、买卖均衡，两轮不变 → 静态门槛+变化检测都不该报
     st = DefenseState()
-    thin_bids = [(0.10, 200), (0.09, 100)]   # 同档薄、买侧远小于卖侧
-    thick_asks = [(0.11, 5000), (0.12, 5000)]
-    # 第1轮建基线
-    evaluate_defense(st, thin_bids, thick_asks, my_bid=0.10, my_size=100, best_bid=0.10)
-    # 第2轮：簿不变（仍薄、仍偏斜）→ 无变化 → 不触发
-    fired, reasons = evaluate_defense(st, thin_bids, thick_asks, my_bid=0.10, my_size=100, best_bid=0.10)
-    assert not fired, f"静态薄/偏斜不该触发，却报：{reasons}"
+    bids = [(0.52, 1000), (0.51, 1000), (0.50, 1000), (0.48, 1000)]
+    asks = [(0.53, 1000), (0.54, 1000)]
+    evaluate_defense(st, bids, asks, my_bid=0.50, my_size=100, best_bid=0.52)
+    fired, reasons = evaluate_defense(st, bids, asks, my_bid=0.50, my_size=100, best_bid=0.52)
+    assert not fired, f"健康稳定簿不该触发：{reasons}"
 
 
-def test_absolute_floors_trigger_only_when_enabled():
+def test_absolute_floors_toggle():
+    # 静态绝对兜底：默认开（用户要"防一单被吃"）；显式关则静态薄不报（仍可走变化检测）
     from config.bot_config import PredictFunDefenseConfig
     st = DefenseState(); st.first_run = False
-    on = PredictFunDefenseConfig(); on.use_absolute_floors = True
-    # 同档 $20 < same_safe 80：开了绝对兜底才报
+    on = PredictFunDefenseConfig()                       # 默认已开 use_absolute_floors
     fired_on, _ = check_bid_threats(st, my_bid=0.10, front=0.0, same=20.0, dc=on)
-    assert fired_on
+    assert fired_on               # 同档 $20 < same_safe 80 → 静态兜底报
+    off = PredictFunDefenseConfig(); off.use_absolute_floors = False
     st2 = DefenseState(); st2.first_run = False
-    fired_off, _ = check_bid_threats(st2, my_bid=0.10, front=0.0, same=20.0, dc=PredictFunDefenseConfig())
-    assert not fired_off          # 默认关 → 静态薄不报
+    fired_off, _ = check_bid_threats(st2, my_bid=0.10, front=0.0, same=20.0, dc=off)
+    assert not fired_off          # 关掉 → 静态薄不报（簿无变化）
 
 
 def test_evaluate_skips_when_no_my_bid():

@@ -46,8 +46,9 @@ def pair_market_legs(quotes: List[Quote], min_size: float, allow_single_sided=No
         allow_single_sided = cfg.predictfun_place.allow_single_sided
     if len(quotes) != 2:
         return [], f"not_binary_{len(quotes)}"
-    quoted = [(t, float(price)) for t, price, _s, _r in quotes if price is not None]
-    skip_reason = next((r for _t, p, _s, r in quotes if p is None), "")
+    # 索引取值（非解包）：quote 可为 4 元 (t,price,size,reason) 或 5 元（末位 eff 效率）
+    quoted = [(q[0], float(q[1])) for q in quotes if q[1] is not None]
+    skip_reason = next((q[3] for q in quotes if q[1] is None), "")
     if len(quoted) == 2:
         p_sum = quoted[0][1] + quoted[1][1]
         if p_sum >= 1.0:                          # 自成交/亏损护栏
@@ -95,6 +96,20 @@ def select_within_budget(
     return selected, total, dropped
 
 
+def _legs_efficiency(quotes: List[Quote], legs: List[Leg]) -> float:
+    """该市场实际入选腿的预期日奖励合计（quote 末位 eff；缺省按 0）。
+
+    按 token 对象身份对齐 legs（pair_market_legs 原样返回 quote 里的 token 对象），
+    故单向时只累计入选那一腿的效率。
+    """
+    leg_ids = {id(t) for t, _p, _s in legs}
+    total = 0.0
+    for q in quotes:
+        if id(q[0]) in leg_ids:
+            total += float(q[4]) if (len(q) > 4 and q[4] is not None) else 0.0
+    return total
+
+
 def build_plan(
     markets: List[Tuple[Any, List[Dict[str, Any]]]],
     quote_fn: Callable[[Dict[str, Any]], Quote],
@@ -102,30 +117,37 @@ def build_plan(
     available: float,
     safety: float = 0.95,
     max_markets: Optional[int] = None,
-) -> Tuple[List[Tuple[Any, List[Leg]]], Dict[str, int], float, int]:
-    """串起来：对每个市场报价→配对→预算守门（懒求值：选满 max_markets 即停止取簿）。
+) -> Tuple[List[Tuple[Any, List[Leg], float]], Dict[str, int], float, int]:
+    """串起来：报价全部市场→配对→**按挂单效率降序**→预算贪心（取效率最高的若干）。
 
-    markets: [(market_key, [outcome_token,...])] 已按奖励降序。
-    quote_fn(token)->(token,price,size,reason)；min_size_fn(tokens)->该市场 min_size。
-    max_markets：目标挂满的市场数（None=不限）。懒求值避免对全部候选取簿。
-    返回 (selected_market_legs, skip_reasons, total_cost, dropped_for_budget)。
+    markets: [(market_key, [outcome_token,...])]。
+    quote_fn(token)->(token,price,size,reason[,eff])：末位 eff=该腿预期日奖励（PP/日），
+      由上游用 placer.order_efficiency 算出（缺省 0 时退化为保持输入顺序的稳定排序）。
+    min_size_fn(tokens)->该市场 min_size。max_markets：目标挂满的市场数（None=不限）。
+    注：按效率排序须先报价全部候选（不再懒求值省 API），换取"挂在最高效市场"的正确性。
+    返回 (selected[(key,legs,eff_total)], skip_reasons, total_cost, dropped_for_budget)。
     """
     budget = max(0.0, available) * safety
-    selected: List[Tuple[Any, List[Leg]]] = []
     skip_reasons: Dict[str, int] = {}
-    total = 0.0
-    dropped = 0
+    priced: List[Tuple[Any, List[Leg], float]] = []
     for key, tokens in markets:
-        if max_markets is not None and len(selected) >= max_markets:
-            break                          # 选满目标，停止继续取簿（省 API）
         quotes = [quote_fn(t) for t in tokens]
         legs, reason = pair_market_legs(quotes, min_size_fn(tokens))
         if not legs:
             skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
             continue
+        priced.append((key, legs, _legs_efficiency(quotes, legs)))
+    priced.sort(key=lambda x: x[2], reverse=True)   # 挂单效率降序（稳定：eff 全 0 时保持输入序）
+
+    selected: List[Tuple[Any, List[Leg], float]] = []
+    total = 0.0
+    dropped = 0
+    for key, legs, eff in priced:
+        if max_markets is not None and len(selected) >= max_markets:
+            break                          # 已选满目标市场数（已是效率最高的若干）
         cost = market_cost(legs)
         if total + cost <= budget:
-            selected.append((key, legs))
+            selected.append((key, legs, eff))
             total += cost
         else:
             dropped += 1

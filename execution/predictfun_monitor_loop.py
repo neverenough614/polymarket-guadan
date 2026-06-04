@@ -10,15 +10,17 @@ evaluate_and_execute 为同步、可注入 fake backend 的单 token 处理单�
 monitor_loop 仅做轮询调度。Polymarket 路径不受影响。
 """
 import asyncio
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from config.bot_config import cfg
 from orderbook.analyzer import get_orderbook_info
-from predictfun_data.monitor import decide_action, NONE
+from predictfun_data.monitor import decide_action, reward_active, NONE
 from predictfun_data.churn_guard import ChurnGuard
 from predictfun_data.placer import place_bid
 from predictfun_data.auto_close import run_auto_close
 from predictfun_data.defense import DefenseState, evaluate_defense
+from predictfun_data.heat import tracker as heat_tracker
 
 
 def _sorted_tuples(book):
@@ -37,13 +39,36 @@ def evaluate_and_execute(
     now: float,
     mcfg=None,
     defense_state: Optional[DefenseState] = None,
+    heat: Any = None,
 ) -> Dict[str, Any]:
-    """单 token：先盯订单簿变化防御，再常规维护买单（均受 churn 放行）。my_bid=我的买价(None=无单)。"""
+    """单 token：先盯订单簿变化防御，再常规维护买单（均受 churn 放行）。my_bid=我的买价(None=无单)。
+
+    heat=None 时不碰热度（便于测试）；传入热度追踪器时：防御触发→记账升温，
+    市场冻结→跳过重挂（避免在反复被攻击的市场一次次重挂被吃）。
+    """
     mcfg = mcfg or cfg.predictfun_monitor
     token_id = token_info["token_id"]
     max_spread = token_info.get("max_spread")
 
     book, best_bid, best_ask, mid = get_orderbook_info(backend, token_id)
+
+    # ── 奖励失效：市场奖励窗口已过 → 撤单 + 停挂（不在无奖励市场白挂被吃）──
+    if not reward_active(token_info.get("reward_ends_at"), datetime.now(timezone.utc)):
+        if my_bid is None:
+            return {"token_id": token_id, "action": "REWARD_INACTIVE",
+                    "reason": "奖励窗口已过 → 不补挂", "cancelled": False}
+        if not churn.allow(token_id, now, count_as_cancel=True):
+            return {"token_id": token_id, "action": "REWARD_ALERT",
+                    "reason": "奖励已过但撤单预算用尽，下轮再撤", "cancelled": False}
+        try:
+            backend.cancel_all_asset(token_id)
+            churn.record(token_id, now, count_as_cancel=True)
+            if defense_state is not None:
+                defense_state.reset()
+        except Exception as e:
+            return {"token_id": token_id, "action": "ERROR", "reason": f"reward-inactive cancel failed: {e}"}
+        return {"token_id": token_id, "action": "REWARD_INACTIVE",
+                "reason": "奖励窗口已过 → 撤单停挂", "cancelled": True}
 
     # ── 防御：盯订单簿深度变化（前墙消失/同档被吃/高水位/趋势/偏斜）──
     if (mcfg.enable_defense and defense_state is not None
@@ -52,6 +77,8 @@ def evaluate_and_execute(
         my_size = max(100.0, float(token_info.get("min_size", 0) or 0))
         triggered, reasons = evaluate_defense(defense_state, bids, asks, my_bid, my_size, best_bid)
         if triggered:
+            if heat is not None:
+                heat.record_defense_trigger(token_id, token_info.get("question", ""))  # 升温/必要时冻结
             if not churn.allow(token_id, now, count_as_cancel=True):
                 # 撤单预算/冷却用尽 → 降级为仅告警（不撤，防反作弊），下轮再判
                 return {"token_id": token_id, "action": "DEFENSE_ALERT",
@@ -72,6 +99,11 @@ def evaluate_and_execute(
     )
     if decision.action == NONE:
         return {"token_id": token_id, "action": NONE, "reason": decision.reason}
+
+    # 冻结市场：不重挂/不重心（停止参与，等冷却过；防在反复被打的市场里反复挂）
+    if heat is not None and heat.is_frozen(token_id):
+        return {"token_id": token_id, "action": "SKIPPED", "wanted": decision.action,
+                "reason": "market frozen (heat)"}
 
     if not churn.allow(token_id, now, count_as_cancel=decision.is_cancel):
         return {"token_id": token_id, "action": "SKIPPED", "wanted": decision.action,
@@ -112,6 +144,7 @@ async def monitor_loop(
     now_fn = now_fn or time.time
     by_id = {str(t["token_id"]): t for t in strategy_tokens}
     defense_states: Dict[str, DefenseState] = {tid: DefenseState() for tid in by_id}
+    close_attempts: Dict[str, int] = {}      # token_id → 连续未成交清仓轮数（卖价逐轮升级保成交）
     print(f"🛡️ [predict.fun 监控] 启动：{len(by_id)} 个 token，轮询 {mcfg.poll_interval_sec}s，"
           f"冷却 {mcfg.token_cooldown_sec}s，撤单预算 {mcfg.max_cancels_per_hour}/h，"
           f"防御={'开' if mcfg.enable_defense else '仅告警'}（盯订单簿变化）")
@@ -123,23 +156,34 @@ async def monitor_loop(
     while not (stop_event and stop_event.is_set()):
         try:
             # 安全网先行：清掉被吃出来的持仓（完整套 merge / 单边卖出），再维护挂单
+            closing_tokens: set = set()
             try:
-                cr = await asyncio.to_thread(run_auto_close, backend)
+                cr = await asyncio.to_thread(run_auto_close, backend, mcfg, close_attempts.get)
                 if cr.get("merged") or cr.get("sold"):
                     print(f"   🧯 [auto_close] merge {cr['merged']} / sell {cr['sold']}")
+                closing_tokens = set(cr.get("closed_tokens") or [])   # 本轮在清仓→跳过维护
+                # 升级计数：本轮仍需卖出(未成交)的 token +1，已清掉的归零
+                sold_now = {str(a.token_id) for a in cr.get("actions", []) if a.kind == "SELL"}
+                for tid in sold_now:
+                    close_attempts[tid] = close_attempts.get(tid, 0) + 1
+                for tid in list(close_attempts):
+                    if tid not in sold_now:
+                        close_attempts.pop(tid, None)
             except Exception as e:
                 print(f"⚠️ [auto_close] 本轮跳过：{e}")
 
             grouped = await asyncio.to_thread(backend.get_all_my_orders_grouped)
             acted = defended = 0
             for tid, token_info in by_id.items():
+                if tid in closing_tokens:
+                    continue                      # 清仓锁：正在平仓的 token 本轮不重挂/不重心
                 info = grouped.get(tid, {})
                 my_bid = info.get("best_bid")   # 我在该 token 上的买价(只挂买单)
                 if my_bid is None and tid in defense_states:
                     defense_states[tid].reset()  # 无单→重置防御基线，避免拿旧墙误判
                 res = await asyncio.to_thread(
                     evaluate_and_execute, backend, token_info, my_bid, churn, now_fn(),
-                    mcfg, defense_states.get(tid),
+                    mcfg, defense_states.get(tid), heat_tracker,
                 )
                 act = res.get("action")
                 if act in ("DEFEND", "DEFENSE_ALERT"):

@@ -33,12 +33,13 @@ from predictfun_data.selection import split_strategies
 
 # 原始奖励市场表（SP3）列
 RAW_COLUMNS = ["question", "token1", "token2", "neg_risk", "min_size", "max_spread",
-               "volatility_sum", "hourly_rate", "fee_rate_bps", "yield_bearing", "market_id", "source"]
-# 打分后策略表（SP4）列：前 7 列对齐 sheet_loader 可解析字段
+               "volatility_sum", "reward_ends_at", "hourly_rate", "fee_rate_bps", "yield_bearing",
+               "market_id", "source"]
+# 打分后策略表（SP4）列：前 7 列对齐 sheet_loader 可解析字段；reward_ends_at 供监控做奖励失效撤单
 SCORED_COLUMNS = ["question", "token1", "token2", "neg_risk", "min_size", "max_spread", "volatility_sum",
                   "spread", "mid_reward_per_100", "gm_reward_per_100", "sm_reward_per_100",
                   "best_bid", "best_ask", "rewards_daily_rate", "hourly_rate", "days_to_expiry",
-                  "fee_rate_bps", "yield_bearing", "market_id", "source"]
+                  "reward_ends_at", "fee_rate_bps", "yield_bearing", "market_id", "source"]
 
 
 def _write_json(rows, path):

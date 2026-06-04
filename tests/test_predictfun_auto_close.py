@@ -1,9 +1,10 @@
 """predict.fun 自动清仓安全网：完整套→merge、单边残余→走簿承接卖出、持仓解析。"""
 from predictfun_data.auto_close import (
     decide_close_actions, positions_to_map, absorbing_sell_price,
-    CloseAction, MERGE, SELL,
+    run_auto_close, CloseAction, MERGE, SELL,
 )
 from predictfun_data import units
+from predictfun_data.normalize import NormalizedBook, BookLevel
 
 
 class _Meta:
@@ -95,6 +96,27 @@ def test_sell_flags_insufficient_depth():
     assert actions[0].kind == SELL and actions[0].depth_sufficient is False
 
 
+def test_sell_offset_escalates_with_attempts():
+    # 同一仓连续未成交 → 让价逐轮加大（保成交止损）
+    metas = {"YES": _Meta("c1", "NO")}
+    bids = {"YES": [(0.30, 500)]}
+    base = decide_close_actions({"YES": 150}, _meta_of(metas), _bids_of(bids),
+                                min_close=5, sell_offset=0.01, max_drop=0.10, tick=0.01)
+    esc = decide_close_actions({"YES": 150}, _meta_of(metas), _bids_of(bids),
+                               min_close=5, sell_offset=0.01, max_drop=0.10, tick=0.01,
+                               attempts_of=lambda t: 3, escalate_step=0.01)
+    assert base[0].price == 0.29        # 0.30 - 0.01
+    assert esc[0].price == 0.26         # 0.30 - (0.01 + 3×0.01)
+
+
+def test_sell_escalation_capped_at_max_drop():
+    metas = {"YES": _Meta("c1", "NO")}
+    esc = decide_close_actions({"YES": 150}, _meta_of(metas), _bids_of({"YES": [(0.30, 500)]}),
+                               min_close=5, sell_offset=0.01, max_drop=0.10, tick=0.01,
+                               attempts_of=lambda t: 99, escalate_step=0.01)
+    assert esc[0].price == 0.20         # 让价封顶 max_drop → 地板 0.30-0.10
+
+
 def test_below_min_close_ignored():
     metas = {"YES": _Meta("c1", "NO")}
     actions = decide_close_actions(
@@ -122,3 +144,42 @@ def test_positions_parse_shares_and_wei():
     assert m["A"] == 150.0
     assert abs(m["B"] - 200.0) < 1e-9
     assert "" not in m
+
+
+# ---------- run_auto_close：清仓锁（返回本轮在清仓的 token，含被撤的对手腿）----------
+class _RunMeta:
+    def __init__(self, cond, comp):
+        self.condition_id = cond
+        self.complement_token_id = comp
+        self.neg_risk = False
+        self.yield_bearing = False
+
+
+class _FakeClient:
+    def merge_positions(self, *a, **k):
+        return {"status": "ok"}
+
+
+class _FakeBackend:
+    def __init__(self):
+        self.raw_client = _FakeClient()
+        self.cancelled, self.created = [], []
+    def get_all_positions(self):
+        return [{"token_id": "YES", "size": "150"}]      # 仅单边持仓 → 走簿卖出
+    def meta_for(self, tid):
+        return _RunMeta("c1", "NO") if tid == "YES" else _RunMeta("c1", "YES")
+    def get_order_book(self, tid):
+        return NormalizedBook(1, [BookLevel(0.30, 500)], [BookLevel(0.32, 500)])
+    def cancel_all_asset(self, tid):
+        self.cancelled.append(str(tid))
+    def create_order(self, token_id, side, price, size, neg_risk=False):
+        self.created.append({"side": side, "token_id": token_id}); return {"status": "live"}
+
+
+def test_run_auto_close_reports_closed_tokens_for_sell():
+    be = _FakeBackend()
+    res = run_auto_close(be)
+    assert res["sold"] == 1
+    # 卖残余前撤了该 token 买单 + 对手腿买单 → 两者都列入 closed_tokens（监控本轮跳过，防边清边买）
+    assert set(res["closed_tokens"]) == {"YES", "NO"}
+    assert set(be.cancelled) == {"YES", "NO"}

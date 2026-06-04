@@ -25,6 +25,28 @@ def _accumulate(df: pd.DataFrame, source_label: str, tokens: List[Dict], seen: D
     return _parse_sheet_tokens(df, source_label, tokens, seen, max_spread_unit_cents=False)
 
 
+def _collect_reward_ends(df: pd.DataFrame, ends_map: Dict[str, str]) -> None:
+    """从 df 收集 token_id → reward_ends_at（_parse_sheet_tokens 不携带此列，单独补）。"""
+    if df is None or getattr(df, "empty", True) or "reward_ends_at" not in df.columns:
+        return
+    for _, row in df.iterrows():
+        ends = row.get("reward_ends_at")
+        if ends is None or str(ends).strip().lower() in ("", "nan", "none"):
+            continue
+        for col in ("token1", "token2"):
+            tid = str(row.get(col, "")).strip()
+            if tid and len(tid) > 10 and tid.lower() != "nan":
+                ends_map[tid] = ends
+
+
+def _apply_reward_ends(tokens: List[Dict], ends_map: Dict[str, str]) -> None:
+    """把 reward_ends_at 写回每个 token（监控据此做奖励失效撤单）。"""
+    for t in tokens:
+        e = ends_map.get(str(t.get("token_id", "")))
+        if e is not None:
+            t["reward_ends_at"] = e
+
+
 def load_from_sheet() -> List[Dict]:
     """读 PF Normal LP + PF High Reward 两标签 → 去重后的 token 列表。失败抛异常。"""
     from data_updater.google_utils import get_spreadsheet
@@ -32,14 +54,17 @@ def load_from_sheet() -> List[Dict]:
     sh = get_spreadsheet()
     tokens: List[Dict] = []
     seen: Dict[str, int] = {}
+    ends_map: Dict[str, str] = {}
     for tab, label in ((sc.normal_sheet, "Normal LP"), (sc.agg_sheet, "High Reward")):
         try:
             wk = sh.worksheet(tab)
             df = pd.DataFrame(wk.get_all_records())
             n = _accumulate(df, label, tokens, seen)
+            _collect_reward_ends(df, ends_map)
             print(f"   📋 '{tab}': {len(df)} 行 → {n} 个新 token")
         except Exception as e:
             print(f"   ⚠️ 读取 '{tab}' 失败（可能尚未创建）：{e}")
+    _apply_reward_ends(tokens, ends_map)
     return tokens
 
 
@@ -48,6 +73,7 @@ def load_from_json() -> List[Dict]:
     sc = cfg.predictfun_selection
     tokens: List[Dict] = []
     seen: Dict[str, int] = {}
+    ends_map: Dict[str, str] = {}
     for path, label in ((sc.normal_json_path, "Normal LP"), (sc.aggressive_json_path, "High Reward")):
         if not os.path.exists(path):
             continue
@@ -57,7 +83,10 @@ def load_from_json() -> List[Dict]:
         except (json.JSONDecodeError, OSError) as e:
             print(f"⚠️ [predict.fun] 本地 JSON 读取失败({path})：{e}")
             continue
-        _accumulate(pd.DataFrame(rows), label, tokens, seen)
+        df = pd.DataFrame(rows)
+        _accumulate(df, label, tokens, seen)
+        _collect_reward_ends(df, ends_map)
+    _apply_reward_ends(tokens, ends_map)
     return tokens
 
 

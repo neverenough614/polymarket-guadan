@@ -19,11 +19,40 @@ place_bid 串起来下单。NO 侧用其自身（已 complement）的簿，逻�
 from typing import Any, Dict, List, Optional, Tuple
 
 from config.bot_config import cfg
+from reward_efficiency import estimate_order_reward_per_100
 from . import units
 
 
 def _ok(resp: Any) -> bool:
     return bool(resp) and resp.get("status") != "error"
+
+
+def order_efficiency(
+    bids: Any,
+    price: float,
+    size: float,
+    mid: float,
+    max_spread: Optional[float],
+    daily_rate: float,
+    side_fraction: float = 0.5,
+) -> Dict[str, float]:
+    """单张买单的预期日奖励 + 每 100 USDT 占用效率（复用 Polymarket 官方公式，零漂移）。
+
+    predict.fun 与 Polymarket 共用同一套实时 LP 奖励机制，故直接套
+    estimate_order_reward_per_100：q_score=((max_spread-|价-mid|)/max_spread)²，
+    我的份额=我的q / (簿内带内Σq + 我的q)，预期日奖励=日奖励率×side_fraction×份额。
+    bids 为该 outcome **自身**买档（我的 BUY 的同侧竞争对手）。带外/无效→全 0。
+    """
+    est = estimate_order_reward_per_100(
+        levels=bids, my_price=price, my_size=size, midpoint=mid,
+        max_spread=max_spread or 0.0, rewards_daily_rate=daily_rate or 0.0,
+        side_reward_fraction=side_fraction,
+    )
+    return {
+        "expected_daily_reward": float(est.get("expected_daily_reward", 0.0) or 0.0),
+        "expected_reward_per_100": float(est.get("expected_reward_per_100", 0.0) or 0.0),
+        "my_q_share": float(est.get("my_q_share", 0.0) or 0.0),
+    }
 
 
 def _sorted_levels(book: Any) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:

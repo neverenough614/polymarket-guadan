@@ -7,11 +7,29 @@ YES+NO 两个 token 各一张买单即构成共享簿上的双边。故监控是
 其余一律不动(避免触发反作弊"撤单滥用")。频率由 churn_guard 在循环层把关。
 """
 from dataclasses import dataclass
-from typing import Optional
+from datetime import datetime
+from typing import Any, Optional
+
+from .market_discovery import parse_iso
 
 NONE = "NONE"
 REFILL = "REFILL"
 RECENTER = "RECENTER"
+
+
+def reward_active(reward_ends_at: Any, now_dt: datetime) -> bool:
+    """奖励窗口是否仍有效。无 endsAt / 解析失败 → True（无法判定→视为有效，不误撤）。
+
+    奖励窗口结束（now ≥ endsAt）后应撤单并停挂：无奖励还挂只是白担被吃风险。
+    reward_ends_at 来自发现期 rewards.current.endsAt（保守判定：到期即停；若被续期，
+    重跑 discover 会刷新）。
+    """
+    if not reward_ends_at:
+        return True
+    end = parse_iso(reward_ends_at)
+    if end is None:
+        return True
+    return now_dt < end
 
 
 @dataclass(frozen=True)

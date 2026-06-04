@@ -1,7 +1,9 @@
 """SP5: 监控防御 —— churn 双闸 + 稳挂少动决策(每 token 一张买单) + 编排。"""
+from datetime import datetime, timezone
+
 import execution.predictfun_monitor_loop as mloop
 from predictfun_data.churn_guard import ChurnGuard
-from predictfun_data.monitor import decide_action, NONE, REFILL, RECENTER
+from predictfun_data.monitor import decide_action, reward_active, NONE, REFILL, RECENTER
 from predictfun_data.normalize import NormalizedBook, BookLevel
 from predictfun_data.defense import DefenseState
 
@@ -145,3 +147,70 @@ def test_evaluate_refill_places_without_cancel(monkeypatch):
     assert be.cancelled == []               # 不撤
     assert calls.get("placed") is True       # 补挂买单
     assert g.remaining_budget(now=1.0) == 1 # 补单不耗撤单预算
+
+
+# ---------- 热度接入 ----------
+class FakeHeat:
+    def __init__(self, frozen=False):
+        self.frozen = frozen
+        self.recorded = []
+    def record_defense_trigger(self, tid, question=""):
+        self.recorded.append((tid, question))
+    def is_frozen(self, tid):
+        return self.frozen
+
+
+def test_defense_trigger_records_heat():
+    # 防御触发时给热度记账（升温）
+    be = FakeBackend(); g = ChurnGuard(token_cooldown_sec=180, max_cancels_per_hour=60)
+    st = DefenseState(); st.first_run = False; st.last_front = 500.0; st.front_hw = 500.0
+    heat = FakeHeat()
+    res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.49, churn=g, now=1.0,
+                                     defense_state=st, heat=heat)
+    assert res["action"] == "DEFEND"
+    assert heat.recorded == [("T", "q")]            # 记了一次防御触发
+
+
+def test_frozen_market_skips_refill(monkeypatch):
+    # 冻结市场：即使缺单也不重挂（停止参与，等冷却）
+    be = FakeBackend(); g = ChurnGuard(0, max_cancels_per_hour=5)
+    placed = {}
+    monkeypatch.setattr(mloop, "place_bid", lambda *a, **k: placed.update(p=True) or {"status": "placed"})
+    res = mloop.evaluate_and_execute(be, TOKEN, my_bid=None, churn=g, now=1.0, heat=FakeHeat(frozen=True))
+    assert res["action"] == "SKIPPED" and "frozen" in res["reason"]
+    assert be.created == [] and placed == {}          # 不重挂
+
+
+# ---------- reward_active 纯函数 ----------
+def test_reward_active_rules():
+    now = datetime(2026, 6, 4, tzinfo=timezone.utc)
+    assert reward_active(None, now) is True            # 无 endsAt → 视为有效
+    assert reward_active("garbage", now) is True        # 解析失败 → 视为有效（不误撤）
+    assert reward_active("2099-01-01T00:00:00Z", now) is True   # 未到期
+    assert reward_active("2020-01-01T00:00:00Z", now) is False  # 已过期
+
+
+# ---------- 奖励失效撤单/停挂 ----------
+EXPIRED = {**TOKEN, "reward_ends_at": "2020-01-01T00:00:00Z"}
+
+
+def test_reward_inactive_cancels_when_has_order():
+    be = FakeBackend(); g = ChurnGuard(0, max_cancels_per_hour=60)
+    res = mloop.evaluate_and_execute(be, EXPIRED, my_bid=0.49, churn=g, now=1.0)
+    assert res["action"] == "REWARD_INACTIVE" and res["cancelled"] is True
+    assert be.cancelled == ["T"] and be.created == []   # 撤单、不重挂
+
+
+def test_reward_inactive_skips_refill_when_no_order(monkeypatch):
+    be = FakeBackend(); g = ChurnGuard(0, max_cancels_per_hour=60)
+    monkeypatch.setattr(mloop, "place_bid", lambda *a, **k: {"status": "placed"})
+    res = mloop.evaluate_and_execute(be, EXPIRED, my_bid=None, churn=g, now=1.0)
+    assert res["action"] == "REWARD_INACTIVE" and res["cancelled"] is False
+    assert be.cancelled == [] and be.created == []      # 无奖励市场不补挂
+
+
+def test_reward_active_future_runs_normally():
+    be = FakeBackend(); g = ChurnGuard(0, max_cancels_per_hour=60)
+    fut = {**TOKEN, "reward_ends_at": "2099-01-01T00:00:00Z"}
+    res = mloop.evaluate_and_execute(be, fut, my_bid=0.49, churn=g, now=1.0)
+    assert res["action"] == NONE                        # 奖励有效 + 在带内 → 正常不动

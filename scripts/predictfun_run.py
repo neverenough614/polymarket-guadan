@@ -30,8 +30,9 @@ from execution.factory import create_execution_backend
 from execution.predictfun_monitor_loop import monitor_loop
 from predictfun_data.strategy_loader import load_predictfun_markets
 from predictfun_data.churn_guard import ChurnGuard
-from predictfun_data.placer import compute_quote, place_leg
+from predictfun_data.placer import compute_quote, place_leg, order_efficiency
 from predictfun_data.budget import build_plan, available_after_open_buys
+from predictfun_data.heat import tracker as heat_tracker
 from orderbook.analyzer import get_orderbook_info
 
 SAFETY = 0.95   # 预算缓冲：累计预扣 ≤ 余额×此值（防边界 + 留 gas/滑点余量）
@@ -72,20 +73,35 @@ def _min_size(tokens):
 
 
 def _quote_fn(backend):
-    """返回 quote_fn(token)->(token, price, size, reason)，内部拉簿 + compute_quote。"""
+    """返回 quote_fn(token)->(token, price, size, reason, eff)，内部拉簿 + compute_quote + 算效率。
+
+    eff=该腿预期日奖励(PP/日)，用 placer.order_efficiency（复用 Polymarket 公式）算，
+    供 build_plan 按"挂单效率"降序选市。无法报价时 eff=0。
+    """
     def fn(t):
-        book, _bb, _ba, _mid = get_orderbook_info(backend, t["token_id"])
+        book, _bb, _ba, mid = get_orderbook_info(backend, t["token_id"])
         meta = backend.meta_for(t["token_id"])
         tick = getattr(meta, "tick_size", 0.01) if meta else 0.01
         min_size = max(100.0, float(t.get("min_size", 0) or 0))
         price, size, reason = compute_quote(book, t.get("max_spread"), tick, min_size)
-        return (t, price, size, reason)
+        eff = 0.0
+        if price is not None and book is not None and mid:
+            daily = float(t.get("rewards_daily_rate", 0) or 0)
+            eff = order_efficiency(book.bids, price, size, mid,
+                                   t.get("max_spread"), daily)["expected_daily_reward"]
+        return (t, price, size, reason, eff)
     return fn
 
 
 def _plan_markets(backend, tokens, n_markets):
     """分组→排序→（按市场数上限截断）→报价配对→预算守门。返回 (selected, skip_reasons, total)。"""
     markets = _group_markets(backend, tokens)
+    # 跳过热度冻结的市场（反复被攻击→冷却期内不再选，避免重挂被吃）
+    before = len(markets)
+    markets = [(k, toks) for k, toks in markets
+               if not any(heat_tracker.is_frozen(str(t["token_id"])) for t in toks)]
+    if before - len(markets) > 0:
+        print(f"[plan] 跳过 {before - len(markets)} 个热度冻结市场")
     # 可用抵押=链上总额−已挂买单预扣（重启/重复下单也不会超额授信）
     total_bal = backend.raw_client.get_usdt_balance()
     available = available_after_open_buys(total_bal, backend.get_all_orders())
@@ -111,12 +127,12 @@ def _setup():
 
 
 def _print_selection(selected, skip_reasons, total, available):
-    print(f"\n--- 选中 {len(selected)} 个完整套市场（按日奖励降序，预算守门 ≤ 余额×{SAFETY}）---")
-    for i, (_key, legs) in enumerate(selected):
+    print(f"\n--- 选中 {len(selected)} 个市场（按挂单效率降序，预算守门 ≤ 余额×{SAFETY}）---")
+    for i, (_key, legs, eff) in enumerate(selected):
         q = str(legs[0][0].get("question", ""))[:34]
         cost = sum(p * s for _t, p, s in legs)
         legs_str = " + ".join(f"{t.get('token_type')} {p:.3f}×{s:.0f}" for t, p, s in legs)
-        print(f"  [{i+1}] {q} → 买 {legs_str}  预扣≈{cost:.1f} USDT")
+        print(f"  [{i+1}] {q} → 买 {legs_str}  预扣≈{cost:.1f} USDT  效率≈{eff:.0f} PP/日")
     print(f"--- 预扣合计≈{total:.1f} / 余额 {available:.1f} USDT（缓冲后上限 {available*SAFETY:.1f}）---")
     if skip_reasons:
         print("   跳过原因：" + ", ".join(f"{k}={v}" for k, v in sorted(skip_reasons.items(), key=lambda x: -x[1])))
@@ -145,7 +161,7 @@ def _place_once(backend, tokens, limit):
     existing = _live_buy_token_ids(backend)
     ok = fail = kept = 0
     target_tokens = []          # 目标在挂的全部 token（已存在 + 新挂成功）→ 交给监控
-    for mi, (_key, legs) in enumerate(selected):
+    for mi, (_key, legs, _eff) in enumerate(selected):
         for t, price, size in legs:
             tid = str(t["token_id"])
             if tid in existing:
