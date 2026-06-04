@@ -101,6 +101,14 @@ def test_quote_none_when_no_in_band_level():
     assert price is None and reason == "no_in_band_level"
 
 
+def test_quote_none_when_imbalanced():
+    # 买侧深度占比过低（前5档够厚以越过 thin 门槛，但买/卖严重失衡）→ 偏斜入场门槛拦下
+    # bid5=0.49*700+0.47*600=625(≥500过thin)；ask5=0.51*5000+0.52*5000=5150；占比 625/5775≈11%<25%
+    book = _book([(0.49, 700), (0.47, 600)], [(0.51, 5000), (0.52, 5000)])
+    price, _, reason = compute_quote(book, max_spread=0.06, tick_size=0.01, min_size=100, pc=PC)
+    assert price is None and reason == "imbalance"
+
+
 # ---------- place_bid：只买不裸卖 ----------
 class _Meta:
     tick_size = 0.001

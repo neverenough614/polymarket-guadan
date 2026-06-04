@@ -34,6 +34,16 @@ def test_churn_refill_not_counted_in_budget():
     assert g.remaining_budget(now=2) == 1
 
 
+def test_churn_budget_ok_ignores_token_cooldown():
+    # 保命撤单判定：只看小时预算，不看 token 冷却
+    g = ChurnGuard(token_cooldown_sec=300, max_cancels_per_hour=2)
+    g.record("t", now=1000)                 # t 刚动过（冷却中）
+    assert g.allow("t", now=1100) is False  # 重挂会被冷却挡
+    assert g.budget_ok(now=1100) is True    # 但撤单只看预算 → 放行
+    g.record("x", now=1100)                 # 预算用掉第 2 个
+    assert g.budget_ok(now=1101) is False   # 预算耗尽 → 安全网生效
+
+
 # ---------- decide_action（每 token 一张买单）----------
 def test_decide_none_when_bid_in_band():
     assert decide_action(0.49, mid=0.50, max_spread=0.02).action == NONE
@@ -135,6 +145,16 @@ def test_defense_alerts_only_when_budget_exhausted():
     res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.49, churn=g, now=1.0, defense_state=st)
     assert res["action"] == "DEFENSE_ALERT" and res["defended"] is False
     assert be.cancelled == []                        # 预算用尽→仅告警不撤（防反作弊）
+
+
+def test_defense_cancels_despite_token_cooldown():
+    # 关键修复：token 刚重挂过(冷却中)，防御仍立即撤单(只受预算)——不再拿着危险单干等冷却
+    be = FakeBackend(); g = ChurnGuard(token_cooldown_sec=300, max_cancels_per_hour=60)
+    g.record("T", now=1.0, count_as_cancel=False)    # 模拟刚 REFILL 重挂→token 冷却已武装
+    st = DefenseState(); st.first_run = False; st.last_front = 500.0; st.front_hw = 500.0
+    res = mloop.evaluate_and_execute(be, TOKEN, my_bid=0.49, churn=g, now=50.0, defense_state=st)
+    assert res["action"] == "DEFEND"                 # 冷却中(50<1+300)仍立即撤
+    assert be.cancelled == ["T"]
 
 
 def test_evaluate_refill_places_without_cancel(monkeypatch):

@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from config.bot_config import cfg
 from reward_efficiency import estimate_order_reward_per_100
+from .defense import check_imbalance
 from . import units
 
 
@@ -119,9 +120,15 @@ def compute_quote(
     tick_size: float,
     min_size: float,
     pc=None,
+    dc=None,
 ) -> Tuple[Optional[float], Optional[float], str]:
-    """该 outcome 买单的 (price, size, reason)。无法安全报价时 price=size=None、reason 说明原因。"""
+    """该 outcome 买单的 (price, size, reason)。无法安全报价时 price=size=None、reason 说明原因。
+
+    含偏斜入场门槛（dc.use_imbalance）：买侧深度占比过低的市场直接不报价——故被防御撤单后，
+    只要市场仍偏斜就不会重挂，等它恢复正常才挂（与防御撤单同一阈值，闭环“恢复正常才挂”）。
+    """
     pc = pc or cfg.predictfun_place
+    dc = dc or cfg.predictfun_defense
     if not book:
         return None, None, "no_book"
     bids, asks = _sorted_levels(book)
@@ -138,6 +145,11 @@ def compute_quote(
     top5 = sum(p * s for p, s in bids[:5])
     if top5 < pc.min_top5_depth:
         return None, None, f"thin_top5_{top5:.0f}"
+
+    if dc.use_imbalance:                          # 买侧深度占比过低→价或跌→不入场（也即被撤后不重挂）
+        imbalanced, _why = check_imbalance(bids, asks, is_extreme=False, dc=dc)
+        if imbalanced:
+            return None, None, "imbalance"
 
     band = float(max_spread)
     pick = select_join_price(bids, mid, band, pc.min_level_depth)

@@ -38,6 +38,16 @@ class ChurnGuard:
             return False
         return True
 
+    def budget_ok(self, now: float) -> bool:
+        """仅校验全局小时撤单预算（不看 token 冷却）。
+
+        用于**保护性撤单**：撤单是保命动作，绝不能被"该 token 刚重挂过"的冷却挡住
+        （否则会拿着危险单干等冷却）。撤单滥用的闸放在"重挂"侧（allow 的 token 冷却）。
+        这里只保留高位小时预算作安全网，正常永不触及。
+        """
+        self._prune(now)
+        return len(self._recent) < self._max_per_hour
+
     def record(self, token_id: str, now: float, count_as_cancel: bool = True) -> None:
         """记录一次已执行的动作（更新冷却；含撤单时计入全局预算）。"""
         self._last_action[str(token_id)] = now

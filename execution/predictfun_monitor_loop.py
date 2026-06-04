@@ -80,8 +80,10 @@ def evaluate_and_execute(
         if triggered:
             if heat is not None:
                 heat.record_defense_trigger(token_id, token_info.get("question", ""))  # 升温/必要时冻结
-            if not churn.allow(token_id, now, count_as_cancel=True):
-                # 撤单预算/冷却用尽 → 降级为仅告警（不撤，防反作弊），下轮再判
+            # 保命撤单：只看高位小时预算安全网，不看 token 冷却 → 危险立即撤（不再干等冷却）。
+            # 撤后 record 会武装 token 冷却，那只约束“重挂”，下次防御撤单仍可立即执行。
+            if not churn.budget_ok(now):
+                # 仅当 1h 撤单预算耗尽（异常情形）→ 降级告警；此时热度多半已冻结该市场并轮换
                 return {"token_id": token_id, "action": "DEFENSE_ALERT",
                         "reason": "; ".join(reasons), "defended": False}
             try:
