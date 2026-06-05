@@ -7,17 +7,23 @@
 Polymarket 标签页一律不动。
 
 用法（Windows PowerShell）：
-  python scripts/predictfun_update_markets.py dryrun    # 只读：打印 + 写本地 JSON，不碰表（默认）
-  python scripts/predictfun_update_markets.py discover   # 发现+打分并写入 PF 标签页 + 本地 JSON
+  python scripts/predictfun_update_markets.py dryrun     # 只读：打印 + 写本地 JSON，不碰表（默认）
+  python scripts/predictfun_update_markets.py discover    # 发现+打分并写入 PF 标签页 + 本地 JSON（跑一次）
+  python scripts/predictfun_update_markets.py discover --loop          # 常驻：每 1h 重新发现+写表（对齐 Polymarket）
+  python scripts/predictfun_update_markets.py discover --loop --interval 1800   # 自定义间隔（秒）
 
 前置 .env：PLATFORM=predictfun / PREDICTFUN_NETWORK=mainnet / PREDICTFUN_PK / PREDICTFUN_API_KEY
         （写表还需 credentials.json + SPREADSHEET_URL，与 Polymarket 同一套）
 """
 import os
 import sys
+import time
 import json
+import traceback
 import concurrent.futures
 from datetime import datetime, timezone
+
+DEFAULT_LOOP_INTERVAL_SEC = 3600   # 发现自循环默认间隔（对齐 Polymarket update_markets.py 的 1h）
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -86,8 +92,7 @@ def _score_markets(client, rows, workers):
     return scored
 
 
-def main() -> int:
-    mode = sys.argv[1] if len(sys.argv) > 1 else "dryrun"
+def _run_once(mode: str) -> int:
     dc, sc = cfg.predictfun_discovery, cfg.predictfun_selection
     print(f"=== predict.fun 发现+打分 runner，模式={mode} ===")
     print("ℹ️ 注：predict.fun 无到期时间/历史波动数据，Polymarket 的 days_to_expiry 与 "
@@ -133,6 +138,46 @@ def main() -> int:
         print("ℹ️ dryrun：未写表。确认上面分流无误后，运行 `discover` 写入 PF 标签页。")
     print("✓ 完成。")
     return 0
+
+
+def _parse_args(argv):
+    """返回 (mode, loop, interval_sec)。mode=首个非 -- 参数；--loop 开自循环；--interval N 秒。"""
+    positional = [a for a in argv[1:] if not a.startswith("--")]
+    mode = positional[0] if positional else "dryrun"
+    loop = "--loop" in argv[1:]
+    interval = DEFAULT_LOOP_INTERVAL_SEC
+    for i, a in enumerate(argv[1:]):
+        if a == "--interval" and i + 1 < len(argv[1:]):
+            try:
+                interval = max(60, int(argv[1:][i + 1]))
+            except (ValueError, TypeError):
+                pass
+        elif a.startswith("--interval="):
+            try:
+                interval = max(60, int(a.split("=", 1)[1]))
+            except (ValueError, TypeError):
+                pass
+    return mode, loop, interval
+
+
+def main() -> int:
+    mode, loop, interval = _parse_args(sys.argv)
+    if not loop:
+        return _run_once(mode)
+    # 常驻自循环（对齐 Polymarket update_markets.py：发现一次→睡 interval→再来）
+    print(f"=== 常驻发现模式：每 {interval}s（{interval/3600:.2f}h）重跑一次，Ctrl+C 退出 ===")
+    while True:
+        try:
+            _run_once(mode)
+            print(f"💤 睡 {interval}s 后重新发现...\n")
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            print("\n[发现] 收到中断，退出。")
+            return 0
+        except Exception as e:
+            traceback.print_exc()
+            print(f"⚠️ 本轮发现失败：{e}；60s 后重试。")
+            time.sleep(60)
 
 
 if __name__ == "__main__":
