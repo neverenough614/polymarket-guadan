@@ -42,7 +42,7 @@ SAFETY = 0.95   # 预算缓冲：累计预扣 ≤ 余额×此值（防边界 + �
 
 # ⚙️ 默认挂几个市场（不带 --limit 时用这个）。想改挂单市场数直接改这里；
 #    命令行 --limit N 仍会临时覆盖它。设 0 = 不限（按预算挂满，慎用）。
-DEFAULT_MARKET_LIMIT = 6
+DEFAULT_MARKET_LIMIT = 8
 
 
 def _parse_args(argv):
@@ -304,6 +304,15 @@ def main() -> int:
                 print(f"[runner] ✅ 已撤所有挂单：{res}")
             except Exception as e:
                 print(f"[runner] ⚠️ 退出撤单失败，请手动跑 `cancel`：{e}")
+            # 收尾清仓：撤单只清挂单，临停前成交的残仓不受影响 → 再扫一遍 merge/卖出，
+            # 否则成交在 live 收尾附近的持仓会被遗留（auto_close 只在 live 跑时执行）。
+            try:
+                from predictfun_data.auto_close import run_auto_close
+                res = run_auto_close(backend)
+                print(f"[runner] ✅ 收尾清仓：merge {res['merged']} / sell {res['sold']}"
+                      f"（清仓动作 {len(res.get('actions', []))} 个）")
+            except Exception as e:
+                print(f"[runner] ⚠️ 退出清仓失败，请手动跑 `close`：{e}")
         return 0
 
     print(f"未知模式 {mode}（plan|live|once|cancel|close）"); return 1
