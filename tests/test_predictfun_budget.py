@@ -135,7 +135,7 @@ def test_build_plan_pairs_then_budgets():
     assert skip_reasons.get("budget_exhausted") == 1   # m3
 
 
-# ---------- build_plan：按挂单效率(quote 第5位 eff)降序选市 ----------
+# ---------- build_plan：按单位资本效率(PP/USDT)降序选市 ----------
 def _q(t, price, eff):
     return (t, price, 100.0, "ok", eff)
 
@@ -162,3 +162,21 @@ def test_build_plan_max_markets_keeps_top_efficiency():
         [A, B], quote_fn, lambda toks: 100.0, available=1000.0, safety=0.95, max_markets=1,
     )
     assert len(selected) == 1 and selected[0][0] == "B"     # 只留效率最高的
+
+
+def test_build_plan_ranks_by_capital_efficiency_not_absolute_pp():
+    """单位资本效率排序：便宜高比市场应胜过昂贵低比市场（即便后者绝对 PP 更高）。
+
+    X：两腿 @0.50×100 → 成本 100，eff 合计 100 → 比 1.0/USDT
+    Y：两腿 @0.10×100 → 成本 20， eff 合计 60  → 比 3.0/USDT
+    绝对 PP：X(100) > Y(60)；但单位资本：Y(3.0) > X(1.0)。max_markets=1 应选 Y。
+    """
+    X = ("X", [_tok("YES"), _tok("NO")])
+    Y = ("Y", [_tok("YES"), _tok("NO")])
+    price = {id(X[1][0]): 0.50, id(X[1][1]): 0.50, id(Y[1][0]): 0.10, id(Y[1][1]): 0.10}
+    eff = {id(X[1][0]): 50.0, id(X[1][1]): 50.0, id(Y[1][0]): 30.0, id(Y[1][1]): 30.0}
+    quote_fn = lambda t: _q(t, price[id(t)], eff[id(t)])
+    selected, _sk, _total, _dropped = build_plan(
+        [X, Y], quote_fn, lambda toks: 100.0, available=1000.0, safety=0.95, max_markets=1,
+    )
+    assert len(selected) == 1 and selected[0][0] == "Y"     # 单位资本效率高者优先（非绝对 PP）

@@ -118,13 +118,15 @@ def build_plan(
     safety: float = 0.95,
     max_markets: Optional[int] = None,
 ) -> Tuple[List[Tuple[Any, List[Leg], float]], Dict[str, int], float, int]:
-    """串起来：报价全部市场→配对→**按挂单效率降序**→预算贪心（取效率最高的若干）。
+    """串起来：报价全部市场→配对→**按单位资本效率(PP/USDT)降序**→预算贪心。
 
     markets: [(market_key, [outcome_token,...])]。
     quote_fn(token)->(token,price,size,reason[,eff])：末位 eff=该腿预期日奖励（PP/日），
       由上游用 placer.order_efficiency 算出（缺省 0 时退化为保持输入顺序的稳定排序）。
-    min_size_fn(tokens)->该市场 min_size。max_markets：目标挂满的市场数（None=不限）。
-    注：按效率排序须先报价全部候选（不再懒求值省 API），换取"挂在最高效市场"的正确性。
+    min_size_fn(tokens)->该市场 min_size。max_markets：目标挂满的市场数（None=不限，仍受预算约束）。
+    注：固定抵押下最大化总 PP 是 0/1 背包；按 PP/USDT 比降序贪心是其标准近似（各市场成本
+      ≪预算时近最优）。比"按绝对 PP 排"更榨资本——便宜高比市场会优先于昂贵低比市场。
+      max_markets 仍作市场数上限，防过度分散（订单多→盯防御/反作弊撤单暴露面大）。
     返回 (selected[(key,legs,eff_total)], skip_reasons, total_cost, dropped_for_budget)。
     """
     budget = max(0.0, available) * safety
@@ -137,7 +139,14 @@ def build_plan(
             skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
             continue
         priced.append((key, legs, _legs_efficiency(quotes, legs)))
-    priced.sort(key=lambda x: x[2], reverse=True)   # 挂单效率降序（稳定：eff 全 0 时保持输入序）
+
+    def _capital_efficiency(item: Tuple[Any, List[Leg], float]) -> float:
+        """每 USDT 的预期日 PP；成本为 0（eff 也必为 0）时记 0，排到最后。"""
+        _k, legs, eff = item
+        cost = market_cost(legs)
+        return (eff / cost) if cost > 0 else 0.0
+
+    priced.sort(key=_capital_efficiency, reverse=True)   # 单位资本效率降序（稳定：全 0 时保持输入序）
 
     selected: List[Tuple[Any, List[Leg], float]] = []
     total = 0.0
