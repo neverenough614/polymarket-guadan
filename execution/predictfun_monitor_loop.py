@@ -205,7 +205,9 @@ async def monitor_loop(
             # 安全网先行：清掉被吃出来的持仓（完整套 merge / 单边卖出），再维护挂单
             closing_tokens: set = set()
             try:
-                cr = await asyncio.to_thread(run_auto_close, backend, mcfg, close_attempts.get)
+                # 用 lambda 带默认 0：close_attempts.get 对新 token 返回 None → decide 里 None*step 崩。
+                cr = await asyncio.to_thread(
+                    run_auto_close, backend, mcfg, lambda t: close_attempts.get(t, 0))
                 if cr.get("merged") or cr.get("sold"):
                     print(f"   🧯 [auto_close] merge {cr['merged']} / sell {cr['sold']}")
                 closing_tokens = set(cr.get("closed_tokens") or [])   # 本轮在清仓→跳过维护

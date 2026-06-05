@@ -109,6 +109,21 @@ def test_sell_offset_escalates_with_attempts():
     assert esc[0].price == 0.26         # 0.30 - (0.01 + 3×0.01)
 
 
+def test_attempts_of_returning_none_treated_as_zero():
+    """attempts_of=dict.get 对新 token 返回 None → 必须按 0，不得 None*step 崩。
+
+    曾因此 live 每轮 auto_close 抛 TypeError 被吞、从不清仓（close 单跑不传 attempts_of 故未暴露）。
+    """
+    metas = {"YES": _Meta("c1", "NO")}
+    bids = {"YES": [(0.30, 500)]}
+    empty = {}                                          # 模拟 close_attempts 尚无该 token
+    out = decide_close_actions({"YES": 150}, _meta_of(metas), _bids_of(bids),
+                               min_close=5, sell_offset=0.01, max_drop=0.10, tick=0.01,
+                               attempts_of=empty.get, escalate_step=0.01)   # .get → None
+    assert out and out[0].kind == SELL
+    assert out[0].price == 0.29                         # n 当 0 → 0.30-0.01，未崩
+
+
 def test_sell_escalation_capped_at_max_drop():
     metas = {"YES": _Meta("c1", "NO")}
     esc = decide_close_actions({"YES": 150}, _meta_of(metas), _bids_of({"YES": [(0.30, 500)]}),

@@ -120,7 +120,9 @@ def decide_close_actions(
         bids = bids_of(token_id)
         if not bids:
             continue                     # 无买档不冒进卖出
-        n = attempts_of(token_id) if attempts_of else 0
+        # attempts_of 可能是 dict.get（缺省返回 None）→ 对 None/缺失一律按 0，否则 None*float 崩
+        # （曾致 live 每轮 auto_close 抛 TypeError 被吞、从不清仓；close 单跑不传 attempts_of 故未暴露）。
+        n = (attempts_of(token_id) or 0) if attempts_of else 0
         eff_offset = min(sell_offset + n * escalate_step, max_drop)   # 连续未成交→逐轮更激进（封顶 max_drop）
         price, sufficient = absorbing_sell_price(bids, residual, eff_offset, max_drop, tick)
         if price is None:
