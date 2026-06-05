@@ -185,6 +185,21 @@ def positions_to_map(rows: List[Dict[str, Any]], min_close: float = 0.0) -> Dict
     return out
 
 
+def _order_ok(res: Any) -> bool:
+    """create_order 成功判定：成功返回 {"status":"live"...}，失败返回 {"status":"error"...}。
+
+    宽松接受常见成功标记，明确拒绝 error/空；非 dict（不应发生）按失败处理，绝不误记为成交。
+    """
+    if not isinstance(res, dict):
+        return False
+    status = str(res.get("status", "")).lower()
+    if status in ("live", "placed", "matched", "ok", "success", "filled"):
+        return True
+    if status == "error" or "error" in res:
+        return False
+    return bool(res.get("order_id") or res.get("hash"))   # 无 status 但有单号也算成功
+
+
 def run_auto_close(backend: Any, mc=None, attempts_of: Optional[Callable[[str], int]] = None) -> Dict[str, Any]:
     """拉持仓→决定动作→撤相关买单→执行 merge/sell。返回执行摘要。
 
@@ -233,10 +248,18 @@ def run_auto_close(backend: Any, mc=None, attempts_of: Optional[Callable[[str], 
                 if comp:
                     backend.cancel_all_asset(comp)
                     closed_tokens.add(str(comp))
-                backend.create_order(a.token_id, "SELL", a.price, a.size, neg_risk=a.neg_risk)
+                # create_order API 失败只返回 {"status":"error"} 不抛异常 → 必须检查返回，
+                # 否则失败也会被记成 sold（曾导致"显示卖出实际没成交"）。
+                res = backend.create_order(a.token_id, "SELL", a.price, a.size, neg_risk=a.neg_risk)
+                if not _order_ok(res):
+                    err = res.get("error") if isinstance(res, dict) else res
+                    print(f"   ❌ [sell 失败] {str(a.token_id)[:12]} ×{a.size:.0f}@{a.price:.3f} → {str(err)[:140]}")
+                    continue
                 sold += 1
                 warn = "" if a.depth_sufficient else " ⚠️承接不足"
-                print(f"   💰 [sell] {str(a.token_id)[:12]} ×{a.size:.0f}@{a.price:.3f}{warn}")
+                oid = res.get("order_id") or res.get("hash") or "" if isinstance(res, dict) else ""
+                print(f"   💰 [sell] {str(a.token_id)[:12]} ×{a.size:.0f}@{a.price:.3f}{warn}"
+                      f"{(' id=' + str(oid)[:14]) if oid else ''}")
         except Exception as e:
             print(f"   ⚠️ [auto_close] {a.kind} 失败: {str(e)[:80]}")
     return {"merged": merged, "sold": sold, "actions": actions, "closed_tokens": list(closed_tokens)}

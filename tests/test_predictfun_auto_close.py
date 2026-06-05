@@ -196,3 +196,28 @@ def test_run_auto_close_reports_closed_tokens_for_sell():
     # 卖残余前撤了该 token 买单 + 对手腿买单 → 两者都列入 closed_tokens（监控本轮跳过，防边清边买）
     assert set(res["closed_tokens"]) == {"YES", "NO"}
     assert set(be.cancelled) == {"YES", "NO"}
+
+
+class _FailSellBackend(_FakeBackend):
+    def create_order(self, token_id, side, price, size, neg_risk=False):
+        self.created.append({"side": side, "token_id": token_id})
+        return {"status": "error", "error": "create_order_rejected"}   # API 拒单不抛异常，只返回 error
+
+
+def test_run_auto_close_does_not_count_failed_sell():
+    """create_order 返回 error 时不得记为 sold（曾因不查返回值显示假成功）。"""
+    be = _FailSellBackend()
+    res = run_auto_close(be)
+    assert res["sold"] == 0                       # 失败的卖单不计数
+    assert be.created and be.created[0]["side"] == "SELL"   # 确实尝试过下单
+
+
+def test_order_ok_judgement():
+    from predictfun_data.auto_close import _order_ok
+    assert _order_ok({"status": "live"}) is True
+    assert _order_ok({"status": "placed"}) is True
+    assert _order_ok({"order_id": "123"}) is True            # 无 status 但有单号
+    assert _order_ok({"status": "error", "error": "x"}) is False
+    assert _order_ok({"error": "x"}) is False
+    assert _order_ok(None) is False
+    assert _order_ok("oops") is False
