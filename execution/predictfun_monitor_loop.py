@@ -133,6 +133,36 @@ def evaluate_and_execute(
             "placed": placed}
 
 
+def apply_reload(
+    fresh_tokens: List[Dict[str, Any]],
+    by_id: Dict[str, Dict[str, Any]],
+    defense_states: Dict[str, "DefenseState"],
+    backend: Any,
+) -> Dict[str, Any]:
+    """运行内重载：用新表刷新在监控 token 的奖励字段；表里已消失(下架/不再合格)的 → 撤单并移出监控。
+
+    predict.fun 语义不同于 Polymarket：新市场不直接加入监控（受 target_count 预算约束），
+    而是由轮换补位按效率挑——故这里只 刷新现有 + 移除下架，新增交给候选池/backfill。
+    返回 {refreshed, removed, removed_keys}。撤单失败不致命（下轮 auto_close/轮换兜底）。
+    """
+    fresh_by_id = {str(t["token_id"]): t for t in (fresh_tokens or [])}
+    refreshed = 0
+    removed_keys: List[str] = []
+    for tid in list(by_id.keys()):
+        if tid in fresh_by_id:
+            by_id[tid] = fresh_by_id[tid]      # 刷新 reward_ends_at / rewards_daily_rate / max_spread 等
+            refreshed += 1
+        else:
+            removed_keys.append(tid)
+            by_id.pop(tid, None)
+            defense_states.pop(tid, None)
+            try:
+                backend.cancel_all_asset(tid)
+            except Exception:
+                pass
+    return {"refreshed": refreshed, "removed": len(removed_keys), "removed_keys": removed_keys}
+
+
 async def monitor_loop(
     backend: Any,
     strategy_tokens: List[Dict[str, Any]],
@@ -141,11 +171,17 @@ async def monitor_loop(
     stop_event: Optional[asyncio.Event] = None,
     target_count: Optional[int] = None,
     backfill_fn: Optional[Callable[[set, int], List[Dict[str, Any]]]] = None,
+    reload_fn: Optional[Callable[[], List[Dict[str, Any]]]] = None,
+    on_pool_reload: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
 ) -> None:
     """温和轮询监控循环。strategy_tokens 由 predict.fun strategy_loader 提供。
 
     target_count + backfill_fn 同时给定时启用**自动轮换补位**：市场因冻结/奖励失效掉出后，
     从候选里补效率最高的新市场，维持 target_count 个在挂（受预算 + churn + 补位冷却约束）。
+
+    reload_fn 给定时启用**运行内重载**（对齐 Polymarket sheet_sync）：每隔
+    mcfg.sheet_reload_interval_sec 重读策略表→刷新在监控 token 的奖励字段、撤掉下架市场；
+    on_pool_reload(fresh) 用于把新表灌回候选池（供 backfill 看到新市场）。
     """
     import time
     mcfg = cfg.predictfun_monitor
@@ -155,6 +191,7 @@ async def monitor_loop(
     defense_states: Dict[str, DefenseState] = {tid: DefenseState() for tid in by_id}
     close_attempts: Dict[str, int] = {}      # token_id → 连续未成交清仓轮数（卖价逐轮升级保成交）
     last_backfill = 0.0                       # 上次补位时间戳（受 backfill_cooldown_sec 约束）
+    last_reload = now_fn()                    # 上次表重载时间戳（开局已是最新，隔 interval 才重载）
     print(f"🛡️ [predict.fun 监控] 启动：{len(by_id)} 个 token，轮询 {mcfg.poll_interval_sec}s，"
           f"冷却 {mcfg.token_cooldown_sec}s，撤单预算 {mcfg.max_cancels_per_hour}/h，"
           f"防御={'开' if mcfg.enable_defense else '仅告警'}（盯订单簿变化）")
@@ -205,6 +242,22 @@ async def monitor_loop(
                     print(f"   🛡️ [{act}] {str(token_info.get('question'))[:36]} → {res.get('reason')}")
             if acted or defended:
                 print(f"🛡️ [predict.fun 监控] 维护 {acted} / 防御 {defended}（撤单预算余 {churn.remaining_budget(now_fn())}/h）")
+
+            # ── 运行内重载：每 interval 重读策略表，刷新奖励字段/候选池、撤掉下架市场 ──
+            if reload_fn and (now_fn() - last_reload) >= mcfg.sheet_reload_interval_sec:
+                try:
+                    fresh = await asyncio.to_thread(reload_fn)
+                    if fresh:
+                        if on_pool_reload:           # 先灌候选池→下方轮换/backfill 看到新市场
+                            on_pool_reload(fresh)
+                        rr = await asyncio.to_thread(apply_reload, fresh, by_id, defense_states, backend)
+                        print(f"   🔄 [重载] 表刷新：在监控 {rr['refreshed']} / 下架移除 {rr['removed']}"
+                              f"（候选池 {len(fresh)} token）")
+                    else:
+                        print("   🔄 [重载] 表读到 0 token，保持原配置")
+                except Exception as e:
+                    print(f"⚠️ [重载] 本轮跳过：{e}")
+                last_reload = now_fn()
 
             # ── 自动轮换补位：死市场(冻结/奖励失效)移出 → 用候选补满目标市场数 ──
             if target_count and backfill_fn:

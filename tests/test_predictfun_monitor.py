@@ -1,4 +1,5 @@
 """SP5: 监控防御 —— churn 双闸 + 稳挂少动决策(每 token 一张买单) + 编排。"""
+import asyncio
 from datetime import datetime, timezone
 
 import execution.predictfun_monitor_loop as mloop
@@ -255,3 +256,84 @@ def test_backfill_counts_only_alive_slots():
 def test_backfill_disabled_when_target_zero():
     dead, n = backfill_need({"A": False}, target=0)
     assert n == 0                                        # target=0(不限)→不补
+
+
+# ---------- apply_reload（运行内重载：刷新现有 + 撤掉下架）----------
+def test_apply_reload_refreshes_existing_token_fields():
+    be = FakeBackend()
+    old = {"token_id": "T", "max_spread": 0.02, "rewards_daily_rate": 100, "reward_ends_at": "old"}
+    by_id = {"T": old}
+    states = {"T": DefenseState()}
+    fresh = [{"token_id": "T", "max_spread": 0.03, "rewards_daily_rate": 500, "reward_ends_at": "new"}]
+    rr = mloop.apply_reload(fresh, by_id, states, be)
+    assert rr["refreshed"] == 1 and rr["removed"] == 0
+    assert by_id["T"]["rewards_daily_rate"] == 500       # 奖励字段被刷新
+    assert by_id["T"]["reward_ends_at"] == "new"
+    assert be.cancelled == []                            # 未下架 → 不撤单
+
+
+def test_apply_reload_cancels_and_drops_delisted():
+    be = FakeBackend()
+    by_id = {"T": {"token_id": "T"}, "GONE": {"token_id": "GONE"}}
+    states = {"T": DefenseState(), "GONE": DefenseState()}
+    fresh = [{"token_id": "T", "rewards_daily_rate": 50}]   # GONE 不在新表
+    rr = mloop.apply_reload(fresh, by_id, states, be)
+    assert rr["removed"] == 1 and rr["removed_keys"] == ["GONE"]
+    assert "GONE" not in by_id and "GONE" not in states    # 移出监控
+    assert be.cancelled == ["GONE"]                          # 下架市场被撤单
+    assert "T" in by_id                                      # 存活的保留
+
+
+def test_apply_reload_empty_fresh_drops_all():
+    be = FakeBackend()
+    by_id = {"A": {"token_id": "A"}, "B": {"token_id": "B"}}
+    states = {"A": DefenseState(), "B": DefenseState()}
+    rr = mloop.apply_reload([], by_id, states, be)
+    assert rr["removed"] == 2 and by_id == {}
+    assert set(be.cancelled) == {"A", "B"}
+
+
+# ---------- monitor_loop 全循环集成：reload 分支真的接通 ----------
+class ReloadFakeBackend:
+    """够 monitor_loop 跑一轮的最小 backend：无我方挂单、撤单可记账。"""
+    def __init__(self):
+        self.cancelled = []
+    def get_all_my_orders_grouped(self):
+        return {}                                   # 无挂单 → 维护循环走 REFILL（已被 monkeypatch 掉）
+    def cancel_all_asset(self, tid):
+        self.cancelled.append(tid)
+    def meta_for(self, tid):
+        return None
+
+
+def test_monitor_loop_reload_branch_end_to_end(monkeypatch):
+    """跑通整圈：reload 计时到点 → 灌候选池 → 刷新现有 + 撤下架。证明 B 的接线真的通。"""
+    mc = mloop.cfg.predictfun_monitor
+    monkeypatch.setattr(mc, "sheet_reload_interval_sec", 0)   # 立即到点
+    monkeypatch.setattr(mc, "poll_interval_sec", 0)           # 不空等
+    # auto_close / 单 token 维护 monkeypatch 成 no-op，聚焦验 reload
+    monkeypatch.setattr(mloop, "run_auto_close",
+                        lambda *a, **k: {"merged": 0, "sold": 0, "actions": [], "closed_tokens": []})
+    monkeypatch.setattr(mloop, "evaluate_and_execute", lambda *a, **k: {"action": NONE})
+
+    be = ReloadFakeBackend()
+    stop = asyncio.Event()
+    pool_seen = {}
+    initial = [{"token_id": "T", "rewards_daily_rate": 100, "reward_ends_at": None},
+               {"token_id": "GONE", "rewards_daily_rate": 100, "reward_ends_at": None}]
+    fresh = [{"token_id": "T", "rewards_daily_rate": 999, "reward_ends_at": "x"}]  # GONE 已下架
+
+    def reload_fn():
+        return fresh
+    def on_pool_reload(f):
+        pool_seen["pool"] = f
+        stop.set()                                  # 重载一次后即停，跑完本圈退出
+
+    asyncio.run(mloop.monitor_loop(
+        be, initial, churn=ChurnGuard(0, 999), now_fn=lambda: 100.0, stop_event=stop,
+        reload_fn=reload_fn, on_pool_reload=on_pool_reload,
+    ))
+
+    assert pool_seen["pool"] is fresh               # 候选池被灌入新表
+    assert be.cancelled == ["GONE"]                 # 下架市场撤单
+    # 注：monitor_loop 内部维护的是局部 by_id，此处通过撤单行为间接验证 GONE 被移除

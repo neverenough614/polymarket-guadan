@@ -250,8 +250,15 @@ async def _live(backend, tokens, limit):
     churn = ChurnGuard(mc.token_cooldown_sec, mc.max_cancels_per_hour)
     target_count = limit if (limit and limit > 0) else None   # 0/不限 → 不做轮换补位
     backfill_fn = _make_backfill(backend, tokens) if target_count else None
-    print("\n=== 进入守护循环（盯订单簿变化防御 + auto_close + 自动轮换补位；Ctrl+C 退出自动撤光清场）===")
-    await monitor_loop(backend, target, churn, target_count=target_count, backfill_fn=backfill_fn)
+    # 运行内重载（对齐 Polymarket sheet_sync）：重读表→刷新奖励字段、撤掉下架市场；
+    # on_pool_reload 原地刷新 tokens（_make_backfill 捕获的就是它，闭包即见新候选池）。
+    def _on_pool_reload(fresh):
+        tokens[:] = fresh
+    print("\n=== 进入守护循环（盯订单簿变化防御 + auto_close + 自动轮换补位 + 表重载；Ctrl+C 退出自动撤光清场）===")
+    await monitor_loop(
+        backend, target, churn, target_count=target_count, backfill_fn=backfill_fn,
+        reload_fn=load_predictfun_markets, on_pool_reload=_on_pool_reload,
+    )
 
 
 def main() -> int:

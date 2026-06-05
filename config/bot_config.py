@@ -203,6 +203,7 @@ class PredictFunMonitorConfig:
     close_max_drop: float = 0.10         # 最大让价：簿在此范围内吃不下→尽力卖并告警（防卖到地板）
     close_escalate_step: float = 0.01    # 同一仓连续未成交→每轮在让价上再加此值（到 max_drop 封顶，保成交止损）
     backfill_cooldown_sec: int = 60      # 自动轮换补位最小间隔（市场冻结/奖励失效掉出后，隔此秒数才补新市场，防抖）
+    sheet_reload_interval_sec: int = 3600  # 运行内重载策略表间隔（对齐 Polymarket sheet_sync；重读表→刷新奖励字段/候选池、撤掉下架市场）
 
 
 @dataclass
