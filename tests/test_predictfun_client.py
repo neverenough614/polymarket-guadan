@@ -27,6 +27,7 @@ from predictfun_data.predictfun_client import PredictFunClient
 class FakeAmounts:
     maker_amount = 52_000_000
     taker_amount = 100_000_000
+    price_per_share = 569_000_000_000_000_000   # SDK 截断后的有效价（≠ 我们输入的 pps_wei）
 
 
 class FakeSignedOrder:
@@ -105,7 +106,20 @@ def test_create_order_builds_signed_body_and_normalizes():
     assert order["makerAmount"] == "52000000"
     assert order["side"] == 0
     assert "pricePerShare" in body["data"]
-    assert "pricePerShare" in body["data"]
+
+
+def test_create_order_body_uses_sdk_effective_price_not_raw_pps():
+    """body 的 pricePerShare 必须用 amounts.price_per_share（SDK 截 3 位有效数字后的有效价），
+
+    而非我们输入价的 wei。否则 SDK 据截断价算的 maker/taker 与 body 的 pricePerShare 不符，
+    被 predict.fun 判 create_order_limit_amounts_mismatch 拒单（曾致 SELL 单卖不掉）。
+    """
+    c = make_client()
+    # 0.570 的 wei 真值含浮点尾(569999…)，与 FakeAmounts.price_per_share(569000…) 不同 → 能区分两者
+    c.create_order("tok", "SELL", 0.570, 22, neg_risk=False, is_yield_bearing=False)
+    body = c.rest.created[0]
+    assert body["data"]["pricePerShare"] == str(FakeAmounts.price_per_share)   # 用 SDK 有效价
+    assert body["data"]["pricePerShare"] != str(int(round(0.570 * 10**18)))    # 不是原始 pps_wei
 
 
 def test_create_order_error_returns_error_status():

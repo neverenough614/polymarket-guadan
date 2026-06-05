@@ -138,7 +138,12 @@ class PredictFunClient:
             signed = self._builder.sign_typed_data_order(typed)
             order_hash = self._builder.build_typed_data_hash(typed)  # SignedOrder.hash 为 None，需单独算
             strategy = "LIMIT" if str(order_type).upper() == "LIMIT" else "MARKET"
-            body = self._order_body(signed, order_hash, pps_wei, strategy)
+            # pricePerShare 必须用 SDK 实际使用的有效价(amounts.price_per_share)，而非我们输入的 pps_wei：
+            # get_limit_order_amounts 会把价截到 3 位有效数字（如 0.570 的浮点真值 569999…→569000…=0.569）
+            # 并据此算 maker/taker。若 body 仍发原始 pps_wei，服务端按 maker/taker 反推的价与之不符
+            # → create_order_limit_amounts_mismatch 400 拒单（曾致 SELL 单价含浮点尾时被拒、持仓卖不掉）。
+            effective_pps = getattr(amounts, "price_per_share", None) or pps_wei
+            body = self._order_body(signed, order_hash, effective_pps, strategy)
             resp = self.rest.create_order(body)
             data = resp.get("data", resp)
             return {"status": "live",
