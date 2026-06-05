@@ -47,6 +47,35 @@ def _apply_reward_ends(tokens: List[Dict], ends_map: Dict[str, str]) -> None:
             t["reward_ends_at"] = e
 
 
+def _collect_daily_rate(df: pd.DataFrame, rate_map: Dict[str, float]) -> None:
+    """从 df 收集 token_id → rewards_daily_rate（_parse_sheet_tokens 不携带此列，单独补）。
+
+    没有它则选市效率(order_efficiency)恒为 0，build_plan 排序退化成加载顺序——挂不到
+    PP 最高的市场。故必须把日率补回 token。
+    """
+    if df is None or getattr(df, "empty", True) or "rewards_daily_rate" not in df.columns:
+        return
+    for _, row in df.iterrows():
+        try:
+            rate = float(str(row.get("rewards_daily_rate", 0)).replace(",", ""))
+        except (ValueError, TypeError):
+            continue
+        if rate <= 0:
+            continue
+        for col in ("token1", "token2"):
+            tid = str(row.get(col, "")).strip()
+            if tid and len(tid) > 10 and tid.lower() != "nan":
+                rate_map[tid] = rate
+
+
+def _apply_daily_rate(tokens: List[Dict], rate_map: Dict[str, float]) -> None:
+    """把 rewards_daily_rate 写回每个 token（选市按挂单效率降序的关键输入）。"""
+    for t in tokens:
+        r = rate_map.get(str(t.get("token_id", "")))
+        if r is not None:
+            t["rewards_daily_rate"] = r
+
+
 def load_from_sheet() -> List[Dict]:
     """读 PF Normal LP + PF High Reward 两标签 → 去重后的 token 列表。失败抛异常。"""
     from data_updater.google_utils import get_spreadsheet
@@ -55,16 +84,19 @@ def load_from_sheet() -> List[Dict]:
     tokens: List[Dict] = []
     seen: Dict[str, int] = {}
     ends_map: Dict[str, str] = {}
+    rate_map: Dict[str, float] = {}
     for tab, label in ((sc.normal_sheet, "Normal LP"), (sc.agg_sheet, "High Reward")):
         try:
             wk = sh.worksheet(tab)
             df = pd.DataFrame(wk.get_all_records())
             n = _accumulate(df, label, tokens, seen)
             _collect_reward_ends(df, ends_map)
+            _collect_daily_rate(df, rate_map)
             print(f"   📋 '{tab}': {len(df)} 行 → {n} 个新 token")
         except Exception as e:
             print(f"   ⚠️ 读取 '{tab}' 失败（可能尚未创建）：{e}")
     _apply_reward_ends(tokens, ends_map)
+    _apply_daily_rate(tokens, rate_map)
     return tokens
 
 
@@ -74,6 +106,7 @@ def load_from_json() -> List[Dict]:
     tokens: List[Dict] = []
     seen: Dict[str, int] = {}
     ends_map: Dict[str, str] = {}
+    rate_map: Dict[str, float] = {}
     for path, label in ((sc.normal_json_path, "Normal LP"), (sc.aggressive_json_path, "High Reward")):
         if not os.path.exists(path):
             continue
@@ -86,7 +119,9 @@ def load_from_json() -> List[Dict]:
         df = pd.DataFrame(rows)
         _accumulate(df, label, tokens, seen)
         _collect_reward_ends(df, ends_map)
+        _collect_daily_rate(df, rate_map)
     _apply_reward_ends(tokens, ends_map)
+    _apply_daily_rate(tokens, rate_map)
     return tokens
 
 

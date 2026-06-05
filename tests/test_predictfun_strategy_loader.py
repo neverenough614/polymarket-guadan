@@ -12,14 +12,17 @@ NO2 = "2222222222222222222222222222222222222222222222222222222222222222222222222
 
 NORMAL_ROWS = [
     {"question": "ETH 1k or 3k first", "token1": YES1, "token2": NO1,
-     "neg_risk": True, "min_size": 100, "max_spread": 0.04, "volatility_sum": 0.0},
+     "neg_risk": True, "min_size": 100, "max_spread": 0.04, "volatility_sum": 0.0,
+     "rewards_daily_rate": 250},
 ]
 AGG_ROWS = [
     {"question": "CZ tweet 0-5", "token1": YES2, "token2": NO2,
-     "neg_risk": False, "min_size": 200, "max_spread": 0.06, "volatility_sum": 0.0},
+     "neg_risk": False, "min_size": 200, "max_spread": 0.06, "volatility_sum": 0.0,
+     "rewards_daily_rate": "1,200"},
     # 与 NORMAL 重叠的同一市场（应被跨表去重）
     {"question": "ETH 1k or 3k first", "token1": YES1, "token2": NO1,
-     "neg_risk": True, "min_size": 100, "max_spread": 0.04, "volatility_sum": 0.0},
+     "neg_risk": True, "min_size": 100, "max_spread": 0.04, "volatility_sum": 0.0,
+     "rewards_daily_rate": 250},
 ]
 
 
@@ -51,6 +54,16 @@ def test_load_from_json_keeps_max_spread_as_decimal(tmp_path, monkeypatch):
     assert by_id[YES1]["max_spread"] == 0.04     # 不 /100
     assert by_id[YES2]["max_spread"] == 0.06
     assert by_id[YES2]["neg_risk"] is False
+
+
+def test_load_from_json_carries_rewards_daily_rate(tmp_path, monkeypatch):
+    """日率必须写回 token——否则选市效率恒 0，build_plan 退化成加载顺序。"""
+    _setup(tmp_path, monkeypatch)
+    by_id = {t["token_id"]: t for t in strategy_loader.load_from_json()}
+    assert by_id[YES1]["rewards_daily_rate"] == 250.0      # 两腿都带
+    assert by_id[NO1]["rewards_daily_rate"] == 250.0
+    assert by_id[YES2]["rewards_daily_rate"] == 1200.0     # "1,200" 千分位被清洗
+    assert by_id[NO2]["rewards_daily_rate"] == 1200.0
 
 
 def test_load_from_json_missing_files_returns_empty(tmp_path, monkeypatch):
