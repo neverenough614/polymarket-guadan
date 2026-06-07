@@ -142,7 +142,7 @@ def _setup():
 
 
 def _print_selection(selected, skip_reasons, total, available):
-    print(f"\n--- 选中 {len(selected)} 个市场（按挂单效率降序，预算守门 ≤ 余额×{SAFETY}）---")
+    print(f"\n--- 选中 {len(selected)} 个市场（按单位资本效率 PP/USDT 降序，预算守门 ≤ 余额×{SAFETY}）---")
     for i, (_key, legs, eff) in enumerate(selected):
         q = str(legs[0][0].get("question", ""))[:34]
         cost = sum(p * s for _t, p, s in legs)
