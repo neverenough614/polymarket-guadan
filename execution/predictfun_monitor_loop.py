@@ -192,6 +192,12 @@ async def monitor_loop(
     close_attempts: Dict[str, int] = {}      # token_id → 连续未成交清仓轮数（卖价逐轮升级保成交）
     last_backfill = 0.0                       # 上次补位时间戳（受 backfill_cooldown_sec 约束）
     last_reload = now_fn()                    # 上次表重载时间戳（开局已是最新，隔 interval 才重载）
+    # 防启动竞态重复挂单：_place_once 刚挂的单可能还没出现在 get_all_my_orders（predict.fun 最终一致性），
+    # 首轮维护会误判"无单"→REFILL 再挂一张→重复。给初始 token 预置冷却，压住首轮重挂，
+    # 待 token_cooldown_sec 后订单已可见再正常维护（补位新挂的 token 同理，在补位处补记）。
+    _seed = now_fn()
+    for _tid in by_id:
+        churn.record(_tid, _seed, count_as_cancel=False)
     print(f"🛡️ [predict.fun 监控] 启动：{len(by_id)} 个 token，轮询 {mcfg.poll_interval_sec}s，"
           f"冷却 {mcfg.token_cooldown_sec}s，撤单预算 {mcfg.max_cancels_per_hour}/h，"
           f"防御={'开' if mcfg.enable_defense else '仅告警'}（盯订单簿变化）")
@@ -294,6 +300,7 @@ async def monitor_loop(
                         ntid = str(t["token_id"])
                         by_id[ntid] = t
                         defense_states[ntid] = DefenseState()
+                        churn.record(ntid, now_fn(), count_as_cancel=False)  # 同初挂：压住订单可见前的误重挂
                     if new_tokens:
                         print(f"   ♻️ [轮换] 补挂 {len(new_tokens)} 腿（目标 {target_count} 市场）")
                     last_backfill = now_fn()

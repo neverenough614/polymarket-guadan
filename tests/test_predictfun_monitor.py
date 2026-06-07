@@ -306,6 +306,42 @@ class ReloadFakeBackend:
         return None
 
 
+def test_monitor_loop_seeds_churn_no_duplicate_first_pass(monkeypatch):
+    """启动竞态防护：初挂单还没在挂单列表可见(grouped={})时，首轮不得重复挂单。
+
+    监控启动会给初始 token 预置 churn 冷却 → 首轮 my_bid=None 的 REFILL 被冷却挡住，
+    待订单可见再正常维护。否则每个 token 启动就被重挂一张（用户实测的重复挂单）。
+    """
+    mc = mloop.cfg.predictfun_monitor
+    monkeypatch.setattr(mc, "poll_interval_sec", 0)
+    monkeypatch.setattr(mloop, "run_auto_close",
+                        lambda *a, **k: {"merged": 0, "sold": 0, "actions": [], "closed_tokens": []})
+    stop = asyncio.Event()
+
+    class _BE:
+        def __init__(self):
+            self.created = []
+        def get_all_my_orders_grouped(self):
+            stop.set()                          # 本轮跑完即停
+            return {}                           # 刚挂的单还没可见（最终一致性）
+        def get_order_book(self, tid):
+            return NormalizedBook(1, [BookLevel(0.49, 500)], [BookLevel(0.51, 500)])  # mid 0.5
+        def meta_for(self, tid):
+            return None
+        def create_order(self, *a, **k):
+            self.created.append(a); return {"status": "live"}
+        def cancel_all_asset(self, tid):
+            pass
+
+    be = _BE()
+    tokens = [{"token_id": "T", "max_spread": 0.02, "min_size": 100, "question": "q"}]
+    asyncio.run(mloop.monitor_loop(
+        be, tokens, churn=ChurnGuard(mc.token_cooldown_sec, 999),
+        now_fn=lambda: 1000.0, stop_event=stop,
+    ))
+    assert be.created == []                      # 预置冷却生效 → 首轮不重复挂
+
+
 def test_monitor_loop_reload_branch_end_to_end(monkeypatch):
     """跑通整圈：reload 计时到点 → 灌候选池 → 刷新现有 + 撤下架。证明 B 的接线真的通。"""
     mc = mloop.cfg.predictfun_monitor
