@@ -1,0 +1,17 @@
+[Unit]
+Description=predict.fun discovery loop (refresh strategy sheet every 1h)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/poly-maker
+ExecStart=/root/poly-maker/.venv/bin/python scripts/predictfun_update_markets.py discover --loop
+Restart=on-failure
+RestartSec=30
+# 发现脚本无挂单，SIGTERM 直接停即可
+StandardOutput=append:/var/log/predictfun-discovery.log
+StandardError=append:/var/log/predictfun-discovery.log
+
+[Install]
+WantedBy=multi-user.target

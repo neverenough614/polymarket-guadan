@@ -1,0 +1,20 @@
+[Unit]
+Description=predict.fun live (place / monitor / defense / auto-close / rotation)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/poly-maker
+ExecStart=/root/poly-maker/.venv/bin/python scripts/predictfun_run.py live --limit 10
+Restart=on-failure
+RestartSec=15
+# 关键：停止时发 SIGINT（=Ctrl+C），触发代码里的"撤光所有单 + 收尾清仓"，
+# 否则 systemd 默认 SIGTERM 会直接杀进程、留下未撤挂单。给足清仓时间。
+KillSignal=SIGINT
+TimeoutStopSec=120
+StandardOutput=append:/var/log/predictfun-live.log
+StandardError=append:/var/log/predictfun-live.log
+
+[Install]
+WantedBy=multi-user.target
