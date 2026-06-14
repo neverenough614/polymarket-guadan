@@ -6,7 +6,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/root/poly-maker
-ExecStart=/root/poly-maker/.venv/bin/python scripts/predictfun_run.py live --limit 10
+# 不带 --limit → 用代码里的 DEFAULT_MARKET_LIMIT（当前 8，与本地一致）。
+# 想改市场数：改 scripts/predictfun_run.py 的 DEFAULT_MARKET_LIMIT 后 git pull + 重启；
+# 或在此行末尾加 --limit N 临时覆盖。
+ExecStart=/root/poly-maker/.venv/bin/python scripts/predictfun_run.py live
 Restart=on-failure
 RestartSec=15
 # 关键：停止时发 SIGINT（=Ctrl+C），触发代码里的"撤光所有单 + 收尾清仓"，
