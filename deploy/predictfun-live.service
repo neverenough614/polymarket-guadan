@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=PYTHONUNBUFFERED=1
 WorkingDirectory=/root/poly-maker
 # 不带 --limit → 用代码里的 DEFAULT_MARKET_LIMIT（当前 8，与本地一致）。
 # 想改市场数：改 scripts/predictfun_run.py 的 DEFAULT_MARKET_LIMIT 后 git pull + 重启；

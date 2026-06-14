@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=PYTHONUNBUFFERED=1
 WorkingDirectory=/root/poly-maker
 ExecStart=/root/poly-maker/.venv/bin/python scripts/predictfun_update_markets.py discover --loop
 Restart=on-failure
