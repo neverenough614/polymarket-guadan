@@ -163,6 +163,30 @@ def apply_reload(
     return {"refreshed": refreshed, "removed": len(removed_keys), "removed_keys": removed_keys}
 
 
+def dedup_orders(backend: Any, grouped: Dict[str, Dict[str, Any]]) -> int:
+    """同一 token 有 >1 张买单 → 撤掉多余的、只留一张（保留 bid_ids[0]）。返回撤掉的多余单数。
+
+    兜底防残留重复：无论何种竞态/分组错乱造成的重复挂单，本轮都清掉，绝不累积
+    （每 token 只该有一张买单：买 YES + 买 NO 双边，各一张）。backend 无 _remove_ids→跳过（便于测试）。
+    """
+    remover = getattr(backend, "_remove_ids", None)
+    if not callable(remover):
+        return 0
+    removed = 0
+    for tid, info in (grouped or {}).items():
+        bid_ids = [str(x) for x in (info.get("bid_ids") or []) if str(x)]
+        if len(bid_ids) <= 1:
+            continue
+        extra = bid_ids[1:]                        # 保留第一张，撤其余
+        try:
+            remover(extra)
+            removed += len(extra)
+            print(f"   🧹 [去重] {str(tid)[:12]} 有 {len(bid_ids)} 张买单 → 撤多余 {len(extra)} 张")
+        except Exception as e:
+            print(f"⚠️ [去重] {str(tid)[:12]} 撤多余失败：{e}")
+    return removed
+
+
 async def monitor_loop(
     backend: Any,
     strategy_tokens: List[Dict[str, Any]],
@@ -228,6 +252,8 @@ async def monitor_loop(
                 print(f"⚠️ [auto_close] 本轮跳过：{e}")
 
             grouped = await asyncio.to_thread(backend.get_all_my_orders_grouped)
+            if grouped:
+                await asyncio.to_thread(dedup_orders, backend, grouped)   # 去重保险：撤同 token 多余买单
             acted = defended = 0
             for tid, token_info in by_id.items():
                 if tid in closing_tokens:
@@ -254,6 +280,11 @@ async def monitor_loop(
             # ── 运行内重载：每 interval 重读策略表，刷新奖励字段/候选池、撤掉下架市场 ──
             if reload_fn and (now_fn() - last_reload) >= mcfg.sheet_reload_interval_sec:
                 try:
+                    # 先刷新市场注册表：新市场(discovery 每小时新增)才能被登记→可交易、
+                    # 分组按真 market_id 不错乱（否则未注册 token 被拆成独立 key→轮换/补位重复挂）。
+                    if hasattr(backend, "refresh_markets"):
+                        n_reg = await asyncio.to_thread(lambda: backend.refresh_markets(status="OPEN"))
+                        print(f"   🔄 [重载] 市场注册表刷新：{n_reg} token")
                     fresh = await asyncio.to_thread(reload_fn)
                     if fresh:
                         if on_pool_reload:           # 先灌候选池→下方轮换/backfill 看到新市场

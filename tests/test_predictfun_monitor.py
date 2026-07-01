@@ -293,6 +293,37 @@ def test_apply_reload_empty_fresh_drops_all():
     assert set(be.cancelled) == {"A", "B"}
 
 
+# ---------- dedup_orders（去重保险：同 token 多余买单撤掉只留一张）----------
+def test_dedup_orders_cancels_extras_keeps_first():
+    class _BE:
+        def __init__(self):
+            self.removed = []
+        def _remove_ids(self, ids):
+            self.removed.append(list(ids))
+    be = _BE()
+    grouped = {
+        "A": {"bid_ids": ["a1", "a2", "a3"]},   # 3 张 → 撤 2（留 a1）
+        "B": {"bid_ids": ["b1"]},               # 1 张 → 不动
+        "C": {"bid_ids": []},                   # 0 张 → 不动
+    }
+    n = mloop.dedup_orders(be, grouped)
+    assert n == 2
+    assert be.removed == [["a2", "a3"]]         # 保留第一张，撤其余
+
+
+def test_dedup_orders_noop_without_remover():
+    class _BE:                                   # 无 _remove_ids（如 Polymarket backend/测试桩）
+        pass
+    assert mloop.dedup_orders(_BE(), {"A": {"bid_ids": ["x", "y"]}}) == 0
+
+
+def test_dedup_orders_empty_grouped():
+    class _BE:
+        def _remove_ids(self, ids):
+            raise AssertionError("空 grouped 不该撤单")
+    assert mloop.dedup_orders(_BE(), {}) == 0
+
+
 # ---------- monitor_loop 全循环集成：reload 分支真的接通 ----------
 class ReloadFakeBackend:
     """够 monitor_loop 跑一轮的最小 backend：无我方挂单、撤单可记账。"""
